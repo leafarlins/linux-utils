@@ -7,7 +7,8 @@
 function instala_proxy ()
 {
 	yum -y install cntlm
-	
+	# Antes, exporte as variaveis http_proxy e https_proxy
+	# export http_proxy=user:senha@proxy.br
 	mv /etc/cntlm.conf{,.bkp}
     # Gerado com cntlm -H
 	cat << EOF >> /etc/cntlm.conf
@@ -26,10 +27,26 @@ EOF
 function instala_pacotes () {
     
     rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
-    yum -y install wget rpm-build vim bind-utils iptraf make gcc git cups-pdf ntpdate
-    yum -y install vlc mozilla-vlc pidgin gnome-subtitles gimp
+    yum -y install wget rpm-build vim bind-utils iptraf make gcc git cups-pdf ntpdate icedtea-web
+    yum -y install vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity
+    yum -y update
     # Pacotes para o TST
-    yum -y install pgadmin3
+    yum -y install pgadmin3 libvtemm expect system-config-printer
+    # Pacotes para casa
+    yum -y install tuxguitar azureus kdenlive
+    
+    # LibreOffice 4.4
+   cd /tmp
+   wget http://download.documentfoundation.org/libreoffice/stable/4.4.3/rpm/x86_64/LibreOffice_4.4.3_Linux_x86-64_rpm.tar.gz
+   yum remove -y openoffice* libreoffice*
+   tar -xvf LibreOffice_4.4.3_Linux_x86-64_rpm.tar.gz
+   cd /tmp/LibreOffice_4.4.3.2_Linux_x86-64_rpm/RPMS/
+   yum localinstall -y *.rpm
+   cd /tmp
+   wget http://download.documentfoundation.org/libreoffice/stable/4.4.3/rpm/x86_64/LibreOffice_4.4.3_Linux_x86-64_rpm_langpack_pt-BR.tar.gz
+   tar -xvf LibreOffice_4.4.3_Linux_x86-64_rpm_langpack_pt-BR.tar.gz
+   cd LibreOffice_4.4.3.2_Linux_x86-64_rpm_langpack_pt-BR/RPMS/
+   yum localinstall -y *.rpm
 }
 
 function clonar_repos_git() {
@@ -39,9 +56,16 @@ function clonar_repos_git() {
     git clone git@git.pje.csjt.jus.br:infra/regional.git
 }
 
+function customizar() {
+   yum install -y gnome-tweak-tool
+}
+
 
 ### MAIN ###
-
+   
+   
+   
+   
 #instala_proxy
 
 #instala_pacotes
