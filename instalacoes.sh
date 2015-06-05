@@ -95,6 +95,7 @@ function clonar_repos_git() {
 }
 
 function customizar() {
+   echo "### Customizando ambiente..."
    sudo yum install -y gnome-tweak-tool dconf-editor
    # gedit
    gsettings set org.gnome.gedit.preferences.editor auto-indent true
@@ -108,6 +109,17 @@ function customizar() {
    #gsettings set org.gnome.shell.window-switcher current-workspace-only false
    #gsettings set org.gnome.shell.overrides dynamic-workspaces false
    #gsettings set org.gnome.shell.overrides workspaces-only-on-primary false
+   
+   echo "## Customizando usuários"
+   # Usuário visitante
+   sudo useradd visitas
+   sudo passwd -d visitas
+   sudo mkdir -p /home/visitas/.config/autostart
+   sudo cat << EOF > /home/visitas/.config/autostart/cleanup.sh
+#!/bin/bash
+gvfs-trash Área\ de\ trabalho/* Downloads/*
+EOF
+   sudo chmod +x /home/visitas/.config/autostart/cleanup.sh
    
 }
 
