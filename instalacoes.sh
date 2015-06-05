@@ -4,7 +4,6 @@
 
 # Fedora 21 (ultima mudança)
 
-A=
 
 function instala_proxy ()
 {
@@ -30,16 +29,19 @@ EOF
 }
 
 function instala_pacotes () {
-    
+    echo "### Iniciando instalacoes..."
+    echo "## Instalando pacotes gerais"
     sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
     sudo yum -y install wget rpm-build vim bind-utils iptraf make gcc git cups-pdf ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity
     sudo yum -y update
-    # Pacotes para o TST
-    [ ! -z $TST ] && sudo yum -y install pgadmin3 libvtemm expect system-config-printer
-    # Pacotes para casa
-    sudo yum -y install tuxguitar azureus kdenlive
     
-    # LibreOffice 4.4
+    [ -z $TST ] && instala_ntst || instala_tst
+    
+    # Para desktop
+    [ -z $DESKTOP ] || instala_desktop
+    
+   # LibreOffice 4.4
+   echo "## Instalando LibreOffice 4.4"
    cd /tmp
    wget http://download.documentfoundation.org/libreoffice/stable/4.4.3/rpm/x86_64/LibreOffice_4.4.3_Linux_x86-64_rpm.tar.gz
    sudo yum remove -y openoffice* libreoffice*
@@ -53,6 +55,23 @@ function instala_pacotes () {
    sudo yum localinstall -y *.rpm
 }
 
+function instala_ntst() {
+	echo "## Instalando pacotes para ambiente fora do trabalho"
+	sudo yum -y install tuxguitar azureus kdenlive sound-juicer 
+}
+
+function instala_tst() {
+	echo "## Instalando pacotes para ambiente de trabalho"
+	sudo yum -y install pgadmin3 libvtemm expect system-config-printer
+	instala_proxy
+}
+
+function instala_desktop() {
+	 echo "## Instalando pacotes para desktop"
+    sudo yum install --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+    sudo yum -y install steam
+}
+
 function clonar_repos_git() {
     if [ ! -z $TST ]; then
        mkdir -p ~/git
@@ -61,6 +80,7 @@ function clonar_repos_git() {
        git clone git@git.pje.csjt.jus.br:infra/regional.git
        git clone git@git.pje.csjt.jus.br:infra/puppet.git
     fi
+    echo "## Clonando repositorios do github"
     mkdir -p ~/github
     cd ~/github
     git clone https://github.com/leafarlins/linux-utils.git
@@ -95,6 +115,7 @@ function usage() {
    echo "Usage: $0 [argumentos]
    Argumentos:
       -t                Instalação para estação no TST
+      -d						Instalação para desktop
       -h ou --help      Imprimir a ajuda (esta mensagem) e sair"
 }
 
@@ -108,6 +129,9 @@ while [ "$1" != '' ]; do
       -t | --tst )   
          TST='1'
       ;;
+      -d )   
+         DESKTOP='1'
+      ;;
       -h | --help )  
          usage
          exit ;;
@@ -118,8 +142,6 @@ while [ "$1" != '' ]; do
    shift
 done
 
-   
-#instala_proxy
 
 #instala_pacotes
 

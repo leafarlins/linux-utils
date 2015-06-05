@@ -66,3 +66,6 @@ export PS1
 # export SYSTEMD_PAGER=
 
 # User specific aliases and functions
+
+PERL_MB_OPT="--install_base \"/home/rlins/perl5\""; export PERL_MB_OPT;
+PERL_MM_OPT="INSTALL_BASE=/home/rlins/perl5"; export PERL_MM_OPT;
