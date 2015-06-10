@@ -57,7 +57,7 @@ function instala_pacotes () {
 
 function instala_ntst() {
 	echo "## Instalando pacotes para ambiente fora do trabalho"
-	sudo yum -y install tuxguitar azureus kdenlive sound-juicer 
+	sudo yum -y install tuxguitar amarok kdenlive sound-juicer 
 }
 
 function instala_tst() {
@@ -68,8 +68,26 @@ function instala_tst() {
 
 function instala_desktop() {
 	 echo "## Instalando pacotes para desktop"
+	 cat << EOF > /etc/yum.repos.d/playonlinux.repo
+[playonlinux]
+name=PlayOnLinux Official repository
+baseurl=http://rpm.playonlinux.com/fedora/yum/base
+enable=1
+gpgcheck=0
+gpgkey=http://rpm.playonlinux.com/public.gpg
+EOF
+
     sudo yum install --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
-    sudo yum -y install steam
+    sudo yum -y install steam playonlinux
+    
+    # Instala driver NVidea Gforce GT 630
+    echo "Instalando driver da GeForce"
+    sudo yum localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+    lspci | grep -i VGA
+    sudo yum install -y akmod-nvidia xorg-x11-drv-nvidia-libs kernel-devel acpid
+	 sudo mv /boot/initramfs-$(uname -r).img /boot/initramfs-$(uname -r)-nouveau.img
+	 sudo dracut /boot/initramfs-$(uname -r).img $(uname -r)
+    
 }
 
 function clonar_repos_git() {
