@@ -21,3 +21,5 @@ alias pscpu10='ps auxf | sort -nr -k 3 | head -10'
  
 ## get GPU ram on desktop / laptop## 
 #alias gpumeminfo='grep -i --color memory /var/log/Xorg.0.log'
+alias pegaperfil="$HOME/Copy/Scripts/Facebook/pegaperfil.sh"
+alias flacconvert="$HOME/github/linux-utils/flacconvert.sh"
