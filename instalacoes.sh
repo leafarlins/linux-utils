@@ -32,7 +32,8 @@ function instala_pacotes () {
     echo "### Iniciando instalacoes..."
     echo "## Instalando pacotes gerais"
     sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
-    sudo yum -y install wget rpm-build vim bind-utils iptraf make gcc git cups-pdf ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity
+    sudo yum -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
+    sudo yum -y install wget rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity
     sudo yum -y update
     
     [ -z $TST ] && instala_ntst || instala_tst
@@ -57,7 +58,7 @@ function instala_pacotes () {
 
 function instala_ntst() {
 	echo "## Instalando pacotes para ambiente fora do trabalho"
-	sudo yum -y install tuxguitar amarok kdenlive sound-juicer 
+	sudo yum -y install tuxguitar amarok kdenlive sound-juicer xchat
 }
 
 function instala_tst() {
@@ -78,13 +79,13 @@ gpgkey=http://rpm.playonlinux.com/public.gpg
 EOF
 
     sudo yum install --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
-    sudo yum -y install steam playonlinux
+    sudo yum -y install steam playonlinux 
     
     # Instala driver NVidea Gforce GT 630
     echo "Instalando driver da GeForce"
     sudo yum localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
     lspci | grep -i VGA
-    sudo yum install -y akmod-nvidia xorg-x11-drv-nvidia-libs kernel-devel acpid
+    sudo yum install -y akmod-nvidia xorg-x11-drv-nvidia-libs kernel-devel acpid xorg-x11-drv-nvidia-libs.i686
 	 sudo mv /boot/initramfs-$(uname -r).img /boot/initramfs-$(uname -r)-nouveau.img
 	 sudo dracut /boot/initramfs-$(uname -r).img $(uname -r)
     
