@@ -1,5 +1,6 @@
 ###
 alias la='ls -la'
+alias pje='/home/rlins/git/equipe/pjessh/pje.sh'
 
 ######## Alias para cpu/mem #########
 ## pass options to free ## 
@@ -21,3 +22,5 @@ alias pscpu10='ps auxf | sort -nr -k 3 | head -10'
  
 ## get GPU ram on desktop / laptop## 
 #alias gpumeminfo='grep -i --color memory /var/log/Xorg.0.log'
+alias pegaperfil='/home/rlins/Copy/Scripts/Facebook/pegaperfil.sh'
+alias pegaperfil='/home/rlins/Copy/Scripts/Facebook/pegaperfil.sh'
