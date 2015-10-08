@@ -34,6 +34,7 @@ function instala_pacotes () {
     sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
     sudo yum -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
     sudo yum -y install wget rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity
+    echo "## Atualizando pacotes"
     sudo yum -y update
     
     [ -z $TST ] && instala_ntst || instala_tst
@@ -41,19 +42,33 @@ function instala_pacotes () {
     # Para desktop
     [ -z $DESKTOP ] || instala_desktop
     
-   # LibreOffice 4.4
+    instala_loffice
+}
+
+function instala_loffice () {
+   # LibreOffice 5.0.2
    echo "## Instalando LibreOffice 4.4"
+   VER='5.0.2'
+   LOVERSAO="LibreOffice_$VER""_Linux_x86-64_rpm"
+   LOLANG="LibreOffice_$VER""_Linux_x86-64_rpm_langpack_pt-BR"
+   ERROMSG="## >> ERRO na instalação do libreoffice, confira link de versao. << ##"
    cd /tmp
-   wget http://download.documentfoundation.org/libreoffice/stable/4.4.3/rpm/x86_64/LibreOffice_4.4.3_Linux_x86-64_rpm.tar.gz
-   sudo yum remove -y openoffice* libreoffice*
-   tar -xvf LibreOffice_4.4.3_Linux_x86-64_rpm.tar.gz
-   cd /tmp/LibreOffice_4.4.3.2_Linux_x86-64_rpm/RPMS/
-   sudo yum localinstall -y *.rpm
-   cd /tmp
-   wget http://download.documentfoundation.org/libreoffice/stable/4.4.3/rpm/x86_64/LibreOffice_4.4.3_Linux_x86-64_rpm_langpack_pt-BR.tar.gz
-   tar -xvf LibreOffice_4.4.3_Linux_x86-64_rpm_langpack_pt-BR.tar.gz
-   cd LibreOffice_4.4.3.2_Linux_x86-64_rpm_langpack_pt-BR/RPMS/
-   sudo yum localinstall -y *.rpm
+   wget http://download.documentfoundation.org/libreoffice/stable/$VER/rpm/x86_64/$LOVERSAO.tar.gz -O $LOVERSAO.tar.gz
+   if [ $? -eq 0 ]; then
+      sudo yum remove -y openoffice* libreoffice*
+      tar -xvf $LOVERSAO.tar.gz
+      cd /tmp/LibreOffice_*Linux_x86-64_rpm/RPMS/
+      sudo yum localinstall -y *.rpm
+      [ $? -ne 0 ] && echo "$ERROMSG"
+      cd /tmp
+      wget http://download.documentfoundation.org/libreoffice/stable/$VER/rpm/x86_64/$LOLANG.tar.gz -O $LOLANG.tar.gz
+      [ $? -ne 0 ] && echo "$ERROMSG"
+      tar -xvf $LOLANG.tar.gz
+      cd /tmp/*langpack_pt-BR/RPMS/
+      sudo yum localinstall -y *.rpm
+      [ $? -ne 0 ] && echo "$ERROMSG"
+   else echo "$ERROMSG"
+   fi
 }
 
 function instala_ntst() {
@@ -63,13 +78,13 @@ function instala_ntst() {
 
 function instala_tst() {
 	echo "## Instalando pacotes para ambiente de trabalho"
-	sudo yum -y install pgadmin3 libvtemm expect system-config-printer
+	sudo yum -y install pgadmin3 libvtemm expect system-config-printer meld rdesktop
 	instala_proxy
 }
 
 function instala_desktop() {
 	 echo "## Instalando pacotes para desktop"
-	 cat << EOF > /etc/yum.repos.d/playonlinux.repo
+	 sudo cat << EOF > /etc/yum.repos.d/playonlinux.repo
 [playonlinux]
 name=PlayOnLinux Official repository
 baseurl=http://rpm.playonlinux.com/fedora/yum/base
@@ -82,7 +97,7 @@ EOF
     sudo yum -y install steam playonlinux 
     
     # Instala driver NVidea Gforce GT 630
-    echo "Instalando driver da GeForce"
+    echo "## Instalando driver da GeForce"
     sudo yum localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
     lspci | grep -i VGA
     sudo yum install -y akmod-nvidia xorg-x11-drv-nvidia-libs kernel-devel acpid xorg-x11-drv-nvidia-libs.i686
@@ -147,6 +162,7 @@ function usage() {
    Argumentos:
       -t                Instalação para estação no TST
       -d						Instalação para desktop
+      -lo					Instalação apenas do libreoffice
       -h ou --help      Imprimir a ajuda (esta mensagem) e sair"
 }
 
@@ -154,18 +170,18 @@ function usage() {
 
 while [ "$1" != '' ]; do
    case $1 in
-      -a | -aaa )    shift
-                     A=$1
-      ;;
       -t | --tst )   
          TST='1'
       ;;
       -d )   
          DESKTOP='1'
       ;;
+      -lo )  
+         instala_loffice
+         exit 0 ;;
       -h | --help )  
          usage
-         exit ;;
+         exit 0 ;;
       * ) 
          usage
          exit 1
@@ -174,6 +190,6 @@ while [ "$1" != '' ]; do
 done
 
 
-#instala_pacotes
+instala_pacotes
 
-#clonar_repos_git
+clonar_repos_git
