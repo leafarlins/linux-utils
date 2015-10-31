@@ -33,7 +33,7 @@ function instala_pacotes () {
     echo "## Instalando pacotes gerais"
     sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
     sudo yum -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
-    sudo yum -y install wget rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity
+    sudo yum -y install wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity
     echo "## Atualizando pacotes"
     sudo yum -y update
     
@@ -42,7 +42,15 @@ function instala_pacotes () {
     # Para desktop
     [ -z $DESKTOP ] || instala_desktop
     
+    # Codecs de audio e video
+    instala_codecs
+    
     instala_loffice
+}
+
+function instala_codecs() {
+	sudo yum -y localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-stable.noarch.rpm
+	sudo yum -y install gstreamer gstreamer-ffmpeg gstreamer-plugins-bad gstreamer-plugins-bad-free gstreamer-plugins-bad-free-extras gstreamer-plugins-bad-nonfree gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugins-ugly faad2 faac libdca wget compat-libstdc++-33 compat-libstdc++-296 xine-lib-extras-freeworld
 }
 
 function instala_loffice () {
@@ -84,7 +92,7 @@ function instala_tst() {
 
 function instala_desktop() {
 	 echo "## Instalando pacotes para desktop"
-	 sudo cat << EOF > /etc/yum.repos.d/playonlinux.repo
+	 cat << EOF > /tmp/playonlinux.repo
 [playonlinux]
 name=PlayOnLinux Official repository
 baseurl=http://rpm.playonlinux.com/fedora/yum/base
@@ -92,8 +100,8 @@ enable=1
 gpgcheck=0
 gpgkey=http://rpm.playonlinux.com/public.gpg
 EOF
-
-    sudo yum install --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+    sudo mv /tmp/playonlinux.repo /etc/yum.repos.d/
+    sudo yum -y install --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
     sudo yum -y install steam playonlinux 
     
     # Instala driver NVidea Gforce GT 630
@@ -163,6 +171,7 @@ function usage() {
       -t                Instalação para estação no TST
       -d						Instalação para desktop
       -lo					Instalação apenas do libreoffice
+      -co					Instalação apenas de codecs nao-free
       -h ou --help      Imprimir a ajuda (esta mensagem) e sair"
 }
 
@@ -179,6 +188,9 @@ while [ "$1" != '' ]; do
       -lo )  
          instala_loffice
          exit 0 ;;
+      -co )  
+         instala_codecs
+         exit 0 ;;
       -h | --help )  
          usage
          exit 0 ;;
@@ -190,6 +202,8 @@ while [ "$1" != '' ]; do
 done
 
 
-instala_pacotes
+#instala_pacotes
 
-clonar_repos_git
+#clonar_repos_git
+
+#customizar
