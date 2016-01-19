@@ -2,9 +2,23 @@
 
 # Necessario instalar pacotes flac e lame
 
+while [ "$1" != '' ]; do
+  case $1 in
+    -pre | -p ) shift
+      PRENAME="$1 "
+  ;;
+    -suf | -s ) shift
+      SUFNAME=" $1"
+  ;;
+    * ) echo "Parametro invalido."
+  esac
+  shift
+done
+
 for a in *.flac; do
   # give output correct extension
   OUTF="${a[@]/%flac/mp3}"
+  OUTF="$PRENAME$OUTF$SUFNAME"
 
   # get the tags
   ARTIST=$(metaflac "$a" --show-tag=ARTIST | sed s/.*=//g)
