@@ -4,23 +4,27 @@
 
 # Fedora 21 (ultima mudança)
 
-
 function instala_proxy ()
 {
 	sudo yum -y install cntlm
+   erro "Falha no download de pacotes."
 	# Antes, exporte as variaveis http_proxy e https_proxy
 	# export http_proxy=user:senha@proxy.br
 	sudo mv /etc/cntlm.conf{,.bkp}
     # Gerado com cntlm -H
-	sudo cat << EOF >> /etc/cntlm.conf
-Username        c054979
-PassLM          B2B0A12E1E29B556552C4BCA4AEBFB11
-PassNT          CCD9C08F6DC3BC3F7CAB80CD170BB5B4
-PassNTLMv2      4BA3935D62453CE12672EF472E4ABB6D    # Only for user 'c054979', domain ''
-Proxy proxy3.tst.jus.br:3128
-NoProxy localhost, 127.0.0.*, 0.0.0.0, 10.0.0.0/8, *.csjt.jus.br, *.tst.jus.br, *.jt.jus.br
+	cat << EOF > /tmp/cntlm.conf
+Username    c054979
+Domain		rede
+Workstation	eti-i36997
+#Proxy		10.0.3.135:3128
+Proxy	      proxyserver.rede.tst:3128
+Auth        NTLM
+PassNT      CCD9C08F6DC3BC3F7CAB80CD170BB5B4
+PassLM      B2B0A12E1E29B556552C4BCA4AEBFB11
+NoProxy intranet,*.jt.gov.br,*.tst.gov.br,*.jt.jus.br,*.enamat.gov.br,www1.tesouro.fazenda.gov.br,localhost,*.redetst,aplicacao*.tst.gov.br,aplicacao*.tst.jus.br,aplicacao*.jt.jus.br,aplicacao*.jt.gov.br,bacenjud.stj.cnj,*.cnj,www.cnj.jus.br,www.tst.jus.br,www3.tst.jus.br,portaldeprojetos.tst.jus.br,intranet.tst.gov.br,aplicacao.tst.jus.br,aplicacao6.tst.jus.br,10.*.*.*,aplicacao5.tst.jus.br,aplicacao3.tst.jus.br,*contas.tcu.gov.br,*.rede.tst,vm274,vm285,vm421,*.redejt,127.0.0.1
 Listen 3128
 EOF
+    sudo mv /tmp/cntlm.conf /etc/cntlm.conf
     sudo systemctl restart cntlm.service
     
     sudo chkconfig cntlm on
@@ -30,14 +34,15 @@ EOF
 
 function instala_pacotes () {
     echo "### Iniciando instalacoes..."
-    echo "## Instalando pacotes gerais"
+    [ -z $TST ] && prepara_ntst || prepara_tst
+    echo "## Instalando pacotes"
     sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
     sudo yum -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
-    sudo yum -y install wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity
+    erro "Falha na instalação de pacotes."
+    sudo yum -y install $PACOTES
+    erro "Falha na instalação de pacotes."
     echo "## Atualizando pacotes"
     sudo yum -y update
-    
-    [ -z $TST ] && instala_ntst || instala_tst
     
     # Para desktop
     [ -z $DESKTOP ] || instala_desktop
@@ -49,45 +54,49 @@ function instala_pacotes () {
 }
 
 function instala_codecs() {
+	echo "## Instalando codecs..."
 	sudo yum -y localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-stable.noarch.rpm
-	sudo yum -y install gstreamer gstreamer-ffmpeg gstreamer-plugins-bad gstreamer-plugins-bad-free gstreamer-plugins-bad-free-extras gstreamer-plugins-bad-nonfree gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugins-ugly faad2 faac libdca wget compat-libstdc++-33 compat-libstdc++-296 xine-lib-extras-freeworld
-        sudo yum -y install flac lame
+	sudo yum -y install gstreamer gstreamer-ffmpeg gstreamer-plugins-bad gstreamer-plugins-bad-free gstreamer-plugins-bad-free-extras gstreamer-plugins-bad-nonfree gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugins-ugly faad2 faac libdca compat-libstdc++-33 compat-libstdc++-296 xine-lib-extras-freeworld flac lame
+   erro "Falha na instalação de pacotes."
 }
 
 function instala_loffice () {
    # LibreOffice 5.0.2
-   echo "## Instalando LibreOffice 4.4"
    VER='5.0.2'
    LOVERSAO="LibreOffice_$VER""_Linux_x86-64_rpm"
    LOLANG="LibreOffice_$VER""_Linux_x86-64_rpm_langpack_pt-BR"
    ERROMSG="## >> ERRO na instalação do libreoffice, confira link de versao. << ##"
+   echo "## Instalando LibreOffice $VER"
    cd /tmp
    wget http://download.documentfoundation.org/libreoffice/stable/$VER/rpm/x86_64/$LOVERSAO.tar.gz -O $LOVERSAO.tar.gz
-   if [ $? -eq 0 ]; then
+   erro "$ERROMSG. Problema no download."
+   
       sudo yum remove -y openoffice* libreoffice*
       tar -xvf $LOVERSAO.tar.gz
       cd /tmp/LibreOffice_*Linux_x86-64_rpm/RPMS/
       sudo yum localinstall -y *.rpm
-      [ $? -ne 0 ] && echo "$ERROMSG"
+      erro "$ERROMSG"
       cd /tmp
       wget http://download.documentfoundation.org/libreoffice/stable/$VER/rpm/x86_64/$LOLANG.tar.gz -O $LOLANG.tar.gz
-      [ $? -ne 0 ] && echo "$ERROMSG"
+      erro "$ERROMSG"
       tar -xvf $LOLANG.tar.gz
       cd /tmp/*langpack_pt-BR/RPMS/
       sudo yum localinstall -y *.rpm
-      [ $? -ne 0 ] && echo "$ERROMSG"
-   else echo "$ERROMSG"
-   fi
+      erro "$ERROMSG"
 }
 
-function instala_ntst() {
-	echo "## Instalando pacotes para ambiente fora do trabalho"
-	sudo yum -y install tuxguitar amarok kdenlive sound-juicer xchat
+function prepara_ntst() {
+   NTSTPKG=' tuxguitar amarok kdenlive sound-juicer xchat'
+   PACOTES+="$NTSTPKG"
+	echo "## Adicionando pacotes para ambiente fora do trabalho"
+	echo "$NTSTPKG"
 }
 
-function instala_tst() {
-	echo "## Instalando pacotes para ambiente de trabalho"
-	sudo yum -y install pgadmin3 libvtemm expect system-config-printer meld rdesktop
+function prepara_tst() {
+   TSTPKG=' pgadmin3 libvtemm expect system-config-printer meld rdesktop'
+   PACOTES+="$TSTPKG"
+	echo "## Adicionando pacotes para ambiente de trabalho"
+	echo "$TSTPKG"
 	instala_proxy
 }
 
@@ -103,13 +112,15 @@ gpgkey=http://rpm.playonlinux.com/public.gpg
 EOF
     sudo mv /tmp/playonlinux.repo /etc/yum.repos.d/
     sudo yum -y install --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
-    sudo yum -y install steam playonlinux 
+    sudo yum -y install steam playonlinux
+    erro "Falha no download de pacotes."
     
     # Instala driver NVidea Gforce GT 630
     echo "## Instalando driver da GeForce"
     sudo yum localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
     lspci | grep -i VGA
     sudo yum install -y akmod-nvidia xorg-x11-drv-nvidia-libs kernel-devel acpid xorg-x11-drv-nvidia-libs.i686
+    erro "Falha no download de pacotes."
 	 sudo mv /boot/initramfs-$(uname -r).img /boot/initramfs-$(uname -r)-nouveau.img
 	 sudo dracut /boot/initramfs-$(uname -r).img $(uname -r)
     
@@ -120,13 +131,17 @@ function clonar_repos_git() {
        mkdir -p ~/git
        cd ~/git
        git clone git@git.pje.csjt.jus.br:infra/equipe.git
+       erro "Falha ao clonar repositorio."
        git clone git@git.pje.csjt.jus.br:infra/regional.git
+       erro "Falha ao clonar repositorio."
        git clone git@git.pje.csjt.jus.br:infra/puppet.git
+       erro "Falha ao clonar repositorio."
     fi
     echo "## Clonando repositorios do github"
     mkdir -p ~/github
     cd ~/github
     git clone https://github.com/leafarlins/linux-utils.git
+    erro "Falha ao clonar repositorio."
     
     cd ~
     ln -sf github/linux-utils/bashrc ~/.bashrc
@@ -140,6 +155,7 @@ function clonar_repos_git() {
 function customizar() {
    echo "### Customizando ambiente..."
    sudo yum install -y gnome-tweak-tool dconf-editor
+   erro "Falha no download de gnome-tweak-tool dconf-editor"
    # gedit
    gsettings set org.gnome.gedit.preferences.editor auto-indent true
    gsettings set org.gnome.gedit.preferences.editor bracket-matching true
@@ -152,7 +168,9 @@ function customizar() {
    #gsettings set org.gnome.shell.window-switcher current-workspace-only false
    #gsettings set org.gnome.shell.overrides dynamic-workspaces false
    #gsettings set org.gnome.shell.overrides workspaces-only-on-primary false
-   
+}
+
+function cria_visitas() {
    echo "## Customizando usuários"
    # Usuário visitante
    sudo useradd visitas
@@ -162,21 +180,40 @@ function customizar() {
 #!/bin/bash
 gvfs-trash Área\ de\ trabalho/* Downloads/*
 EOF
+   erro "Falha na criação de arquivo /home/visitas/.config/autostart/cleanup.sh"
    sudo chmod +x /home/visitas/.config/autostart/cleanup.sh
    
 }
 
-function usage() {
-   echo "Usage: $0 [argumentos]
-   Argumentos:
-      -t                Instalação para estação no TST
-      -d						Instalação para desktop
-      -lo					Instalação apenas do libreoffice
-      -co					Instalação apenas de codecs nao-free
-      -h ou --help      Imprimir a ajuda (esta mensagem) e sair"
+function erro() {
+   if [ $? -ne 0 ]; then
+      echo "Ocorreu um erro: $1"
+      echo -ne "Deseja prosseguir? [s/n] "
+      read RESP
+      case $RESP in
+         s | S | y | Y | sim )
+            ;;
+         * )
+           echo "Abortando."
+           exit 1
+      esac
+   fi
 }
 
-### MAIN ###
+function usage() {
+   echo "Usage: $0 [-cdlty]
+   Argumentos:
+      -t    Instalação para estação no TST
+      -d	   Instalação para desktop
+      -l	   Instalação apenas do libreoffice
+      -c	   Instalação apenas de codecs nao-free
+      -y    Instala sem pedir confirmação
+      -h    Imprimir a ajuda (esta mensagem) e sair"
+}
+
+# Variaveis #
+
+PACOTES='wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity'
 
 while [ "$1" != '' ]; do
    case $1 in
@@ -186,11 +223,14 @@ while [ "$1" != '' ]; do
       -d )   
          DESKTOP='1'
       ;;
-      -lo )  
+      -l )  
          instala_loffice
          exit 0 ;;
-      -co )  
+      -c )  
          instala_codecs
+         exit 0 ;;
+      -y )  
+         Y=true
          exit 0 ;;
       -h | --help )  
          usage
@@ -202,9 +242,20 @@ while [ "$1" != '' ]; do
    shift
 done
 
+Y=${Y:-false}
 
-#instala_pacotes
+### MAIN ###
 
-#clonar_repos_git
+$Y || echo -ne "Realizando instalação. Confirma execução? [s/n] "
+$Y && EXEC='y' || read EXEC
+case "$EXEC" in
+   yes | y | Y | s | S | sim )
+      instala_pacotes  
+      clonar_repos_git
+      customizar
+   *)
+      echo "Abortando"
+      exit 0
+esac
+	
 
-#customizar

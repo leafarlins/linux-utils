@@ -69,3 +69,8 @@ export PS1
 
 PERL_MB_OPT="--install_base \"/home/rlins/perl5\""; export PERL_MB_OPT;
 PERL_MM_OPT="INSTALL_BASE=/home/rlins/perl5"; export PERL_MM_OPT;
+
+# Instalacao das Funcoes ZZ (www.funcoeszz.net)
+export ZZOFF=""  # desligue funcoes indesejadas
+export ZZPATH="$HOME/github/linux-utils/funcoeszz-15.5.sh"  # script
+source "$ZZPATH"
