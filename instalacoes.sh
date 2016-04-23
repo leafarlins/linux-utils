@@ -36,10 +36,11 @@ function instala_pacotes () {
     echo "### Iniciando instalacoes..."
     [ -z $TST ] && prepara_ntst || prepara_tst
     echo "## Instalando pacotes"
+    LATEX="texlive texlive-latex texlive-collection-langportuguese texlive-tocbibind texlive-titlesec texlive-relsize texlive-subfigure texlive-lastpage texlive-algorithm2e texlive-cleveref texmaker"
     sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
     sudo yum -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
     erro "Falha na instalação de pacotes."
-    sudo yum -y install $PACOTES
+    sudo yum -y install $PACOTES $LATEX
     erro "Falha na instalação de pacotes."
     echo "## Atualizando pacotes"
     sudo yum -y update
@@ -116,13 +117,8 @@ EOF
     erro "Falha no download de pacotes."
     
     # Instala driver NVidea Gforce GT 630
-    echo "## Instalando driver da GeForce"
-    sudo yum localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+    echo "## Instalande o driver da GeForce."
     lspci | grep -i VGA
-    sudo yum install -y akmod-nvidia xorg-x11-drv-nvidia-libs kernel-devel acpid xorg-x11-drv-nvidia-libs.i686
-    erro "Falha no download de pacotes."
-	 sudo mv /boot/initramfs-$(uname -r).img /boot/initramfs-$(uname -r)-nouveau.img
-	 sudo dracut /boot/initramfs-$(uname -r).img $(uname -r)
     
 }
 
