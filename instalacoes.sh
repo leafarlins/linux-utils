@@ -61,7 +61,12 @@ function instala_codecs() {
    erro "Falha na instalação de pacotes."
 }
 
-function instala_loffice () {
+function instala_loffice() {
+   dnf -y install libreoffice
+   dnf -y install libreoffice-langpack-pt-BR
+}
+
+function instala_loffice_old () {
    # LibreOffice 5.0.2
    VER='5.0.2'
    LOVERSAO="LibreOffice_$VER""_Linux_x86-64_rpm"
