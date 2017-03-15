@@ -74,3 +74,4 @@ PERL_MM_OPT="INSTALL_BASE=/home/rlins/perl5"; export PERL_MM_OPT;
 export ZZOFF=""  # desligue funcoes indesejadas
 export ZZPATH="$HOME/github/linux-utils/funcoeszz-15.5.sh"  # script
 source "$ZZPATH"
+source "$HOME/github/linux-utils/futils.sh" # script futils
