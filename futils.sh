@@ -80,10 +80,7 @@ function durhora() {
   M2="${M2#0}"
   S1="${S1#0}"
   S2="${S2#0}"
-  
-  # Calcula diferenca entre segundos
-  $DS
-  
+    
   # Calcula a diferenca das horas
   DH=$(($H2 - $H1))
   DM=$(($M2 - $M1))
@@ -105,4 +102,4 @@ function durhora() {
   printf "%02d:%02d'%02d\"\n" "$DH" "$DM" "$DS"
 
 }
-durhora $1 $2
+#durhora $1 $2
