@@ -1,0 +1,5 @@
+# Matroska videos: para converter com mesmo codec de video e audio
+ffmpeg -i \[Dollars\ Fansub\]\ Sakamichi\ no\ Apollon\ -\ 1\ \[H264\]\[AAC\]\[HDTV\]\[10bit\]\[00ABDF58\].mkv -vcodec copy -acodec copy Sakamichinoapollon01.mp4
+
+# Para split video
+ffmpeg -i Joy.mkv -vcodec copy -acodec copy -ss 01:05:00 -t 01:30:00 Joy-final.mkv

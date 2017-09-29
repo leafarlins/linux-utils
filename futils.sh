@@ -85,7 +85,8 @@ function durhora() {
   DH=$(($H2 - $H1))
   DM=$(($M2 - $M1))
   DS=$(($S2 - $S1))
-  
+  DIFS=$(($DH * 3600 + $DM * 60 + $DS))
+
   if [ $DS -lt 0 ]; then
     DS=$(($DS + 60))
     DM=$(($DM - 1))
@@ -99,7 +100,10 @@ function durhora() {
   if [ $DH -lt 0 ]; then
     DH=$(($DH + 24))
   fi
-  printf "%02d:%02d'%02d\"\n" "$DH" "$DM" "$DS"
+  if [ "x$3" == "xs" ]; then #Total em segundos
+    echo "$DIFS"
+  else printf "%02d:%02d'%02d\"\n" "$DH" "$DM" "$DS"
+  fi
 
 }
 #durhora $1 $2
