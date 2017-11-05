@@ -3,3 +3,6 @@ ffmpeg -i \[Dollars\ Fansub\]\ Sakamichi\ no\ Apollon\ -\ 1\ \[H264\]\[AAC\]\[HD
 
 # Para split video
 ffmpeg -i Joy.mkv -vcodec copy -acodec copy -ss 01:05:00 -t 01:30:00 Joy-final.mkv
+
+# Convertendo para avi usando mp3codec
+ ffmpeg -i "input.mkv" -f avi -c:v mpeg4 -b:v 4000k -c:a libmp3lame -b:a 320k "converted.avi"
