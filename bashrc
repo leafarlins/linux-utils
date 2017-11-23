@@ -18,18 +18,18 @@ export HISTFILESIZE=100000              # big big history
 shopt -s histappend                     # append to history, don't overwrite it
 
 # setup color variables
-COLOR_RED="\033[0;31m"
-COLOR_YELLOW="\033[0;33m"
-COLOR_GREEN="\033[0;32m"
+COLOR_RED="\033[1;31m"
+COLOR_YELLOW="\033[1;33m"
+COLOR_GREEN="\033[1;32m"
 COLOR_OCHRE="\033[38;5;95m"
-COLOR_BLUE="\033[0;34m"
-COLOR_WHITE="\033[0;37m"
+COLOR_BLUE="\033[1;34m"
+COLOR_WHITE="\033[1;37m"
 COLOR_RESET="\033[0m"
 
 function git_color {
   local git_status="$(git status 2> /dev/null)"
 
-  if [[ ! $git_status =~ "working directory clean" ]]; then
+  if [[ ! $git_status =~ "working tree clean" ]]; then
     echo -e $COLOR_RED
   elif [[ $git_status =~ "Your branch is ahead of" ]]; then
     echo -e $COLOR_YELLOW
@@ -54,7 +54,7 @@ function git_branch {
   fi
 }
 
-PS1="\[$COLOR_WHITE\][\u@local \W]"          # basename of pwd
+PS1="\[$COLOR_WHITE\][\u@local \[$COLOR_BLUE\]\W\[$COLOR_RESET\]]"          # basename of pwd
 PS1+="\[\$(git_color)\]"        # colors git status
 PS1+="\$(git_branch) "           # prints current branch
 PS1+="\[$COLOR_BLUE\]\$\[$COLOR_RESET\] "   # '#' for root, else '$'
