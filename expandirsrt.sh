@@ -42,7 +42,7 @@ function diffhora() {
 }
 
 # Recebe os segundos a expandir e o nome do arquivo
-ARQ=$1
+ARQ="$1"
 SEGA=$2
 HORALAST=''
 > $ARQ.2
@@ -68,7 +68,7 @@ while read line; do
     echo "Nova linha:   $line"
   fi
   echo $line >> "$ARQ.2"
-done < $ARQ
+done < "$ARQ"
 
 
 
