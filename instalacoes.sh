@@ -2,27 +2,31 @@
 
 # Arquivo para instalação dos itens básicos no sistema operacional após sua atualização
 
-# Fedora 21 (ultima mudança)
+# Fedora 27 (ultima mudança)
 
 function instala_proxy ()
 {
-	sudo yum -y install cntlm
+	sudo dnf -y install cntlm
    erro "Falha no download de pacotes."
 	# Antes, exporte as variaveis http_proxy e https_proxy
 	# export http_proxy=user:senha@proxy.br
 	sudo mv /etc/cntlm.conf{,.bkp}
     # Gerado com cntlm -H
 	cat << EOF > /tmp/cntlm.conf
-Username    c054979
+Username        c054979
 Domain		rede
 Workstation	eti-i36997
 #Proxy		10.0.3.135:3128
-Proxy	      proxyserver.rede.tst:3128
-Auth        NTLM
-PassNT      CCD9C08F6DC3BC3F7CAB80CD170BB5B4
-PassLM      B2B0A12E1E29B556552C4BCA4AEBFB11
-NoProxy intranet,*.jt.gov.br,*.tst.gov.br,*.jt.jus.br,*.enamat.gov.br,www1.tesouro.fazenda.gov.br,localhost,*.redetst,aplicacao*.tst.gov.br,aplicacao*.tst.jus.br,aplicacao*.jt.jus.br,aplicacao*.jt.gov.br,bacenjud.stj.cnj,*.cnj,www.cnj.jus.br,www.tst.jus.br,www3.tst.jus.br,portaldeprojetos.tst.jus.br,intranet.tst.gov.br,aplicacao.tst.jus.br,aplicacao6.tst.jus.br,10.*.*.*,aplicacao5.tst.jus.br,aplicacao3.tst.jus.br,*contas.tcu.gov.br,*.rede.tst,vm274,vm285,vm421,*.redejt,127.0.0.1
-Listen 3128
+Proxy		proxyserver.rede.tst:3128
+#PassLM          B2B0A12E1E29B556552C4BCA4AEBFB11
+#PassNT          CCD9C08F6DC3BC3F7CAB80CD170BB5B4
+#PassNTLMv2      4BA3935D62453CE12672EF472E4ABB6D    # Only for user 'c054979', domain ''
+Auth            NTLM
+PassNT          CCD9C08F6DC3BC3F7CAB80CD170BB5B4
+PassLM          B2B0A12E1E29B556552C4BCA4AEBFB11
+NoProxy intranet,*.pje.csjt.jus.br,*.pje2.csjt.jus.br,*.jt.gov.br,*.tst.gov.br,*.jt.jus.br,*.enamat.gov.br,www1.tesouro.fazenda.gov.br,localhost,*.redetst,aplicacao*.tst.gov.br,aplicacao*.tst.jus.br,aplicacao*.jt.jus.br,aplicacao*.jt.gov.br,bacenjud.stj.cnj,*.cnj,www.cnj.jus.br,www.tst.jus.br,www3.tst.jus.br,portaldeprojetos.tst.jus.br,intranet.tst.gov.br,aplicacao.tst.jus.br,aplicacao6.tst.jus.br,10.*.*.*,aplicacao5.tst.jus.br,aplicacao3.tst.jus.br,*contas.tcu.gov.br,*.rede.tst,vm274,vm285,vm421,*.redejt,127.0.0.1
+Listen 10.0.240.40:3128
+Listen 127.0.0.1:3128
 EOF
     sudo mv /tmp/cntlm.conf /etc/cntlm.conf
     sudo systemctl restart cntlm.service
@@ -38,15 +42,13 @@ function instala_pacotes () {
     echo "## Instalando pacotes"
     LATEX="texlive texlive-latex texlive-collection-langportuguese texlive-tocbibind texlive-titlesec texlive-relsize texlive-subfigure texlive-lastpage texlive-algorithm2e texlive-cleveref texmaker texlive-hypernat texlive-boites texlive-needspace texlive-examplep texlive-example texlive-cprotect texlive-algorithmicx texlive-stmaryrd"
     sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
-    sudo yum -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
+    sudo dnf -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
+    sudo dnf config-manager --add-repo=https://negativo17.org/repos/fedora-uld.repo
     erro "Falha na instalação de pacotes."
-    sudo yum -y install $PACOTES $LATEX
+    sudo dnf -y install $PACOTES $LATEX
     erro "Falha na instalação de pacotes."
     echo "## Atualizando pacotes"
-    sudo yum -y update
-    
-    # Para desktop
-    [ -z $DESKTOP ] || instala_desktop
+    sudo dnf -y update
     
     # Codecs de audio e video
     instala_codecs
@@ -56,8 +58,8 @@ function instala_pacotes () {
 
 function instala_codecs() {
 	echo "## Instalando codecs..."
-	sudo yum -y localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-stable.noarch.rpm
-	sudo yum -y install gstreamer gstreamer-ffmpeg gstreamer-plugins-bad gstreamer-plugins-bad-free gstreamer-plugins-bad-free-extras gstreamer-plugins-bad-nonfree gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugins-ugly faad2 faac libdca compat-libstdc++-33 compat-libstdc++-296 xine-lib-extras-freeworld flac lame
+	sudo dnf -y localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-stable.noarch.rpm
+	sudo dnf -y install gstreamer gstreamer-ffmpeg gstreamer-plugins-bad gstreamer-plugins-bad-free gstreamer-plugins-bad-free-extras gstreamer-plugins-bad-nonfree gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugins-ugly faad2 faac libdca compat-libstdc++-33 compat-libstdc++-296 xine-lib-extras-freeworld flac lame
    erro "Falha na instalação de pacotes."
 }
 
@@ -104,27 +106,6 @@ function prepara_tst() {
 	echo "## Adicionando pacotes para ambiente de trabalho"
 	echo "$TSTPKG"
 	instala_proxy
-}
-
-function instala_desktop() {
-	 echo "## Instalando pacotes para desktop"
-	 cat << EOF > /tmp/playonlinux.repo
-[playonlinux]
-name=PlayOnLinux Official repository
-baseurl=http://rpm.playonlinux.com/fedora/yum/base
-enable=1
-gpgcheck=0
-gpgkey=http://rpm.playonlinux.com/public.gpg
-EOF
-    sudo mv /tmp/playonlinux.repo /etc/yum.repos.d/
-    sudo yum -y install --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
-    sudo yum -y install steam playonlinux
-    erro "Falha no download de pacotes."
-    
-    # Instala driver NVidea Gforce GT 630
-    echo "## Instalande o driver da GeForce."
-    lspci | grep -i VGA
-    
 }
 
 function clonar_repos_git() {
@@ -214,7 +195,7 @@ function usage() {
 
 # Variaveis #
 
-PACOTES='wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity'
+PACOTES='wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity uld'
 
 while [ "$1" != '' ]; do
    case $1 in
@@ -258,5 +239,4 @@ case "$EXEC" in
       echo "Abortando"
       exit 0
 esac
-	
 
