@@ -195,7 +195,7 @@ function usage() {
 
 # Variaveis #
 
-PACOTES='wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity uld'
+PACOTES='wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity uld foremost'
 
 while [ "$1" != '' ]; do
    case $1 in
