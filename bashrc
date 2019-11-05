@@ -60,8 +60,6 @@ PS1+="\$(git_branch) "           # prints current branch
 PS1+="\[$COLOR_BLUE\]\$\[$COLOR_RESET\] "   # '#' for root, else '$'
 export PS1
 
-
-
 # Uncomment the following line if you don't like systemctl's auto-paging feature:
 # export SYSTEMD_PAGER=
 
@@ -72,7 +70,7 @@ PERL_MM_OPT="INSTALL_BASE=/home/rlins/perl5"; export PERL_MM_OPT;
 
 # Instalacao das Funcoes ZZ (www.funcoeszz.net)
 export ZZOFF=""  # desligue funcoes indesejadas
-export ZZPATH="$HOME/github/linux-utils/funcoeszz-15.5.sh"  # script
+export ZZPATH="$HOME/github/linux-utils/funcoeszz.sh"  # script v 18.3
 source "$ZZPATH"
 source "$HOME/github/linux-utils/futils.sh" # script futils
 xhost + && clear

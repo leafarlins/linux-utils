@@ -11,7 +11,7 @@
 # LICENÇA    : GPLv2
 # CHANGELOG  : http://www.funcoeszz.net/changelog.html
 #
-ZZVERSAO=15.5
+ZZVERSAO=18.3
 ZZUTF=1
 #
 ##############################################################################
@@ -57,12 +57,9 @@ ZZTMPDIR_DFT="${TMPDIR:-/tmp}"    # diretório temporário
 #
 #
 
-ZZWWWDUMP='lynx -dump      -nolist -width=300 -accept_all_cookies -display_charset=UTF-8'
-ZZWWWLIST='lynx -dump              -width=300 -accept_all_cookies -display_charset=UTF-8'
-ZZWWWPOST='lynx -post-data -nolist -width=300 -accept_all_cookies -display_charset=UTF-8'
-ZZWWWHTML='lynx -source'
-ZZCODIGOCOR='36;1'            # use zzcores para ver os códigos
+# shellcheck disable=SC2034
 ZZSEDURL='s| |+|g;s|&|%26|g;s|@|%40|g'
+ZZCODIGOCOR='36;1'            # use zzcores para ver os códigos
 ZZBASE='zzajuda zztool zzzz'  # Funções essenciais, guardadas neste script
 
 #
@@ -77,7 +74,18 @@ test "${0##*/}" = 'bash' -o "${0#-}" != "$0" || ZZPATH="$0"
 test -n "$ZZPATH" || ZZPATH=$ZZPATH_DFT
 test "${ZZPATH#/}" = "$ZZPATH" && ZZPATH="$PWD/${ZZPATH#./}"
 
-test -n "$ZZDIR" || ZZDIR=$ZZDIR_DFT
+test -d ${ZZPATH%/*}/zz && ZZDIR="${ZZPATH%/*}/zz"
+test -z "$ZZDIR" && test -d $ZZDIR_DFT && ZZDIR=$ZZDIR_DFT
+
+# Descobre qual o navegador em modo texto está disponível no sistema
+if test -z "$ZZBROWSER"
+then
+	for ZZBROWSER in lynx links links2 elinks w3m
+	do
+		type "$ZZBROWSER" >/dev/null 2>&1 && break
+	done
+fi
+export ZZBROWSER
 
 #
 ### Últimos ajustes
@@ -100,6 +108,7 @@ do
 		*) break;;
 	esac
 done
+
 #
 #
 ##############################################################################
@@ -158,8 +167,9 @@ zztool ()
 		acha)
 			# Destaca o padrão $1 no texto via STDIN ou $2
 			# O padrão pode ser uma regex no formato BRE (grep/sed)
-			local esc=$(printf '\033')
-			local padrao=$(echo "$1" | sed 's,/,\\/,g') # escapa /
+			local esc padrao
+			esc=$(printf '\033')
+			padrao=$(echo "$1" | sed 's,/,\\/,g') # escapa /
 			shift
 			zztool multi_stdin "$@" |
 				if test "$ZZCOR" != '1'
@@ -189,7 +199,7 @@ zztool ()
 			# Verifica se o nome de arquivo informado está vago
 			if test -e "$1"
 			then
-				echo "Arquivo $1 já existe. Abortando." >&2
+				test -n "$erro" && echo "Arquivo $1 já existe. Abortando." >&2
 				return 1
 			fi
 		;;
@@ -197,7 +207,7 @@ zztool ()
 			# Verifica se o arquivo existe e é legível
 			if ! test -r "$1"
 			then
-				echo "Não consegui ler o arquivo $1" >&2
+				test -n "$erro" && echo "Não consegui ler o arquivo $1" >&2
 				return 1
 			fi
 
@@ -205,9 +215,9 @@ zztool ()
 		;;
 		num_linhas)
 			# Informa o número de linhas, sem formatação
-			zztool file_stdin "$@" |
-				wc -l |
-				tr -d ' \t'
+			local linhas
+			linhas=$(zztool file_stdin "$@" | sed -n '$=')
+			echo "${linhas:-0}"
 		;;
 		nl_eof)
 			# Garante que a última linha tem um \n no final
@@ -226,23 +236,6 @@ zztool ()
 			test -n "$erro" && echo "Ano inválido '$1'" >&2
 			return 1
 		;;
-		testa_ano_bissexto)
-			# Testa se $1 é um ano bissexto
-			#
-			# A year is a leap year if it is evenly divisible by 4
-			# ...but not if it's evenly divisible by 100
-			# ...unless it's also evenly divisible by 400
-			# http://timeanddate.com
-			# http://www.delorie.com/gnu/docs/gcal/gcal_34.html
-			# http://en.wikipedia.org/wiki/Leap_year
-			#
-			local y=$1
-			test $((y%4)) -eq 0 && test $((y%100)) -ne 0 || test $((y%400)) -eq 0
-			test $? -eq 0 && return 0
-
-			test -n "$erro" && echo "Ano bissexto inválido '$1'" >&2
-			return 1
-		;;
 		testa_numero)
 			# Testa se $1 é um número positivo
 			echo "$1" | grep '^[0-9]\{1,\}$' >/dev/null && return 0
@@ -252,44 +245,6 @@ zztool ()
 
 			# TODO Usar em *todas* as funções que recebem números
 		;;
-		testa_numero_sinal)
-			# Testa se $1 é um número (pode ter sinal: -2 +2)
-			echo "$1" | grep '^[+-]\{0,1\}[0-9]\{1,\}$' >/dev/null && return 0
-
-			test -n "$erro" && echo "Número inválido '$1'" >&2
-			return 1
-		;;
-		testa_numero_fracionario)
-			# Testa se $1 é um número fracionário (1.234 ou 1,234)
-			# regex: \d+[,.]\d+
-			echo "$1" | grep '^[0-9]\{1,\}[,.][0-9]\{1,\}$' >/dev/null && return 0
-
-			test -n "$erro" && echo "Número inválido '$1'" >&2
-			return 1
-		;;
-		testa_dinheiro)
-			# Testa se $1 é um valor monetário (1.234,56 ou 1234,56)
-			# regex: (  \d{1,3}(\.\d\d\d)+  |  \d+  ),\d\d
-			echo "$1" | grep '^\([0-9]\{1,3\}\(\.[0-9][0-9][0-9]\)\{1,\}\|[0-9]\{1,\}\),[0-9][0-9]$' >/dev/null && return 0
-
-			test -n "$erro" && echo "Valor inválido '$1'" >&2
-			return 1
-		;;
-		testa_binario)
-			# Testa se $1 é um número binário
-			echo "$1" | grep '^[01]\{1,\}$' >/dev/null && return 0
-
-			test -n "$erro" && echo "Número binário inválido '$1'" >&2
-			return 1
-		;;
-		testa_ip)
-			# Testa se $1 é um número IP (nnn.nnn.nnn.nnn)
-			local nnn="\([0-9]\{1,2\}\|1[0-9][0-9]\|2[0-4][0-9]\|25[0-5]\)" # 0-255
-			echo "$1" | grep "^$nnn\.$nnn\.$nnn\.$nnn$" >/dev/null && return 0
-
-			test -n "$erro" && echo "Número IP inválido '$1'" >&2
-			return 1
-		;;
 		testa_data)
 			# Testa se $1 é uma data (dd/mm/aaaa)
 			local d29='\(0[1-9]\|[12][0-9]\)/\(0[1-9]\|1[012]\)'
@@ -298,13 +253,6 @@ zztool ()
 			echo "$1" | grep "^\($d29\|$d30\|$d31\)/[0-9]\{1,4\}$" >/dev/null && return 0
 
 			test -n "$erro" && echo "Data inválida '$1', deve ser dd/mm/aaaa" >&2
-			return 1
-		;;
-		testa_hora)
-			# Testa se $1 é uma hora (hh:mm)
-			echo "$1" | grep "^\(0\{0,1\}[0-9]\|1[0-9]\|2[0-3]\):[0-5][0-9]$" >/dev/null && return 0
-
-			test -n "$erro" && echo "Hora inválida '$1'" >&2
 			return 1
 		;;
 		multi_stdin)
@@ -394,6 +342,109 @@ zztool ()
 
 			mktemp "${ZZTMP:-/tmp/zz}.${1:-anonimo}.XXXXXX"
 		;;
+		post | dump | source | list | download)
+			# Estrutura do comando:
+			# zztool <post|dump|source|list|download> [browser] [opções] <url> [dados_post]
+
+			local browser input_charset output_charset output_width user_agent opt_common nbsp_utf
+
+			# A função pode chamar um navegador específico ou assumir o padrão $ZZBROWSER
+			case "$1" in
+				lynx | links | links2 | elinks | w3m) browser="$1"; shift  ;;
+				*                                   ) browser="$ZZBROWSER" ;;
+			esac
+
+			# Parâmetros que podem ser modificados na linha de comando.
+			while test "${1#-}" != "$1"
+			do
+				case "$1" in
+					-i) input_charset="$2";  shift; shift ;;
+					-o) output_charset="$2"; shift; shift ;;
+					-w) output_width="$2";   shift; shift ;;
+					-u) user_agent="$2";     shift; shift ;;
+					-*) break ;;
+				esac
+			done
+
+			output_charset="${output_charset:-UTF-8}"
+			output_width="${output_width:-300}"
+			nbsp_utf=$(printf '\302\240')
+
+			# Para POST se não houver ao menos 2 parâmetros (url e dados) interrompe.
+			test "$ferramenta" = 'post' && test $# -lt 2 && return 1
+
+			# Para outras requisições ao menos 1 parâmetro (url), senão interrompe.
+			test "$ferramenta" != 'post' && test $# -lt 1 && return 1
+
+			# Caracterizando os paramêtros conforme cada navegador.
+			case "$browser" in
+				links | links2) opt_common="-width ${output_width} -codepage ${output_charset}        ${input_charset:+-html-assume-codepage} ${input_charset} ${user_agent:+-http.fake-user-agent} ${user_agent}" ;;
+				lynx          ) opt_common="-width=${output_width} -display_charset=${output_charset} ${input_charset:+-assume_charset=}${input_charset}       ${user_agent:+-useragent=}${user_agent}            -accept_all_cookies" ;;
+				w3m           ) opt_common="-cols ${output_width}  -O ${output_charset}               ${input_charset:+-I} ${input_charset}                    ${user_agent:+-o user_agent=}${user_agent}         -cookie -o follow_redirection=9" ;;
+				elinks        )
+					local aspas='"'
+					opt_common="-dump-width ${output_width} -dump-charset ${output_charset} ${input_charset:+-eval 'set document.codepage.assume = ${aspas}${input_charset}${aspas}'} ${user_agent:+-eval 'set protocol.http.user_agent = $user_agent'} -no-numbering"
+				;;
+			esac
+
+			case "$ferramenta" in
+			post)
+				# Post conforme o navegador escolhido
+				case "$browser" in
+					lynx)
+						echo "$2" | $browser ${opt_common} -post-data -nolist "$1"
+					;;
+					links | links2 | elinks | w3m)
+						local post_temp
+						post_temp=$(zztool mktemp post)
+						curl -L -s "${user_agent:+-A}" "${user_agent}" -o "$post_temp" --data "$2" "$1"
+
+						if test "$browser" = 'w3m'
+						then
+							$browser ${opt_common} -dump -T text/html   "$post_temp"
+						elif test "$browser" = 'elinks'
+						then
+							eval $browser ${opt_common} -dump -no-references "$post_temp" | sed "s/${nbsp_utf}/ /g"
+						else
+							$browser ${opt_common} -dump         file://"$post_temp"
+						fi
+
+						rm -f "$post_temp"
+					;;
+				esac
+			;;
+			dump)
+				case "$browser" in
+					links | links2)      $browser ${opt_common} -dump                "$1" ;;
+					lynx          )      $browser ${opt_common} -dump -nolist        "$1" ;;
+					w3m           )      $browser ${opt_common} -dump -T text/html   "$1" ;;
+					elinks        ) eval $browser ${opt_common} -dump -no-references $(echo "$1" | sed 's/\&/\\&/g') | sed "s/${nbsp_utf}/ /g" ;;
+				esac
+			;;
+			source)
+				curl -L -s "${user_agent:+-A}" "${user_agent}" "$1"
+			;;
+			list)
+				case "$browser" in
+					links | links2)             $browser ${opt_common} -dump                -html-numbered-links 1   "$1" ;;
+					lynx          ) LANG=C      $browser ${opt_common} -dump                                         "$1" ;;
+					elinks        ) LANG=C eval $browser ${opt_common} -dump              $(echo "$1" | sed 's/\&/\\&/g') ;;
+					w3m           )             $browser ${opt_common} -dump -T text/html   -o display_link_number=1 "$1" ;;
+				esac |
+				case "$browser" in
+					links | links2) sed '1,/^Links:/d' ;;
+					lynx  | elinks) sed '1,/^References/d; /Visible links/d; /Hidden links/d' | sed "s/${nbsp_utf}/ /g" ;;
+					w3m           ) sed '1,/^References:/d' ;;
+				esac |
+				sed '/^ *$/d; s/.* //;'
+			;;
+			download)
+				local arq_dest
+				test -n "$2" && arq_dest="$2" || arq_dest=$(basename "$1")
+				zztool source "$1" > "$arq_dest"
+			;;
+			esac
+		;;
 		cache | atualiza)
 		# Limpa o cache se solicitado a atualização
 		# Atualiza o cache se for fornecido a url
@@ -402,17 +453,20 @@ zztool ()
 		# Ex.: local cache=$(zztool cache php) # Apenas retorna o nome do cache
 		# Ex.: zztool cache rm palpite # Apaga o cache diretamente
 			local id
-			case ${1#zz} in
-			on | off | ajuda) break;;
+			case "${1#zz}" in
+			on | off | ajuda)
+				# shellcheck disable=SC2104
+				break
+			;;
 			rm)
 				if test "$2" = '*'
 				then
-					rm -f ${ZZTMP:-XXXX}*
+					rm -f "${ZZTMP:-XXXX}"*
 					# Restabelecendo zz.ajuda, zz.on, zz.off
-					funcoeszz
+					$ZZPATH
 				else
 					test -n "$3" && id=".$3"
-					test -n "$2" && rm -f ${ZZTMP:-XXXX}.${2#zz}${id}*
+					test -n "$2" && rm -f "${ZZTMP:-XXXX}.${2#zz}${id}"*
 				fi
 			;;
 			*)
@@ -421,16 +475,16 @@ zztool ()
 				test -n "$2" && id=".$2"
 
 				# Para atualizar é necessário prevenir a existência prévia do arquivo
-				test "$ferramenta" = "atualiza" && rm -f ${ZZTMP:-XXXX}.${1#zz}$id
+				test "$ferramenta" = "atualiza" && rm -f "${ZZTMP:-XXXX}.${1#zz}$id"
 
 				# Baixo para o cache os dados brutos sem tratamento
 				if ! test -s "$ZZTMP.${1#zz}" && test -n "$3"
 				then
 					case $4 in
 					none    ) : ;;
-					html    ) $ZZWWWHTML "$3" > "$ZZTMP.${1#zz}$id";;
-					list    ) $ZZWWWLIST "$3" > "$ZZTMP.${1#zz}$id";;
-					dump | *) $ZZWWWDUMP "$3" > "$ZZTMP.${1#zz}$id";;
+					html    ) zztool source "$3" > "$ZZTMP.${1#zz}$id";;
+					list    ) zztool list   "$3" > "$ZZTMP.${1#zz}$id";;
+					dump | *) zztool dump   "$3" > "$ZZTMP.${1#zz}$id";;
 					esac
 				fi
 				test "$ferramenta" = "cache" && echo "$ZZTMP.${1#zz}$id"
@@ -526,7 +580,7 @@ zzzz ()
 {
 	local nome_func arg_func padrao func
 	local info_instalado info_instalado_zsh info_cor info_utf8 info_base versao_remota
-	local arquivo_aliases arquivo_zz
+	local arquivo_aliases
 	local n_on n_off
 	local bashrc="$HOME/.bashrc"
 	local tcshrc="$HOME/.tcshrc"
@@ -573,7 +627,7 @@ zzzz ()
 			arg_func=$3
 
 			# Nenhum argumento, mostre a ajuda da própria zzzz
-			if ! test -n "$nome_func"
+			if test -z "$nome_func"
 			then
 				nome_func='zz'
 				arg_func='-h'
@@ -611,7 +665,7 @@ zzzz ()
 			### Todos os comandos necessários estão instalados?
 
 			local comando tipo_comando comandos_faltando
-			local comandos='awk- bc cat chmod- clear- cp cpp- cut diff- du- find- fmt grep iconv- lynx mktemp mv od- ps- rm sed sleep sort tail- tr uniq'
+			local comandos='awk bc cat chmod- clear- cp cpp- curl cut diff- du- find- fmt grep iconv links- lynx- mktemp mv od- ps- rm sed sleep sort tail- tr uniq unzip-'
 
 			for comando in $comandos
 			do
@@ -631,7 +685,7 @@ zzzz ()
 					echo 'OK'
 				else
 					zztool eco "Comando $tipo_comando '$comando' não encontrado"
-					comandos_faltando="$comando_faltando $tipo_comando"
+					comandos_faltando="$comandos_faltando $tipo_comando"
 				fi
 			done
 
@@ -680,7 +734,7 @@ zzzz ()
 		--atualiza)
 
 			echo 'Procurando a versão nova, aguarde.'
-			versao_remota=$($ZZWWWDUMP "$url_site/v")
+			versao_remota=$(zztool dump "$url_site/v")
 			echo "versão local : $ZZVERSAO"
 			echo "versão remota: $versao_remota"
 			echo
@@ -694,8 +748,8 @@ zzzz ()
 				# Vamos baixar a versão ISO-8859-1?
 				test $ZZUTF != '1' && url_exe="${url_exe}-iso"
 
-				echo -n 'Baixando a versão nova... '
-				$ZZWWWHTML "$url_exe" > "funcoeszz-$versao_remota"
+				printf 'Baixando a versão nova... '
+				zztool download "$url_exe" "funcoeszz-$versao_remota"
 				echo 'PRONTO!'
 				echo "Arquivo 'funcoeszz-$versao_remota' baixado, instale-o manualmente."
 				echo "O caminho atual é $ZZPATH"
@@ -709,12 +763,12 @@ zzzz ()
 
 			if ! grep "^[^#]*${ZZPATH:-zzpath_vazia}" "$bashrc" >/dev/null 2>&1
 			then
-				# export ZZDIR="$ZZDIR"  # pasta com as funcoes
 				cat - >> "$bashrc" <<-EOS
 
 				# $instal_msg
 				export ZZOFF=""  # desligue funcoes indesejadas
 				export ZZPATH="$ZZPATH"  # script
+				export ZZDIR="$ZZDIR"    # pasta zz/
 				source "\$ZZPATH"
 				EOS
 
@@ -736,7 +790,10 @@ zzzz ()
 				cat - >> "$tcshrc" <<-EOS
 
 				# $instal_msg
+				# script
 				setenv ZZPATH $ZZPATH
+				# pasta zz/
+				setenv ZZDIR $ZZDIR
 				source $arquivo_aliases
 				EOS
 
@@ -747,7 +804,7 @@ zzzz ()
 			fi
 
 			# Cria o arquivo de aliases
-			echo > $arquivo_aliases
+			echo > "$arquivo_aliases"
 			for func in $(ZZCOR=0 zzzz | grep -v '^(' | sed 's/,//g')
 			do
 				echo "alias zz$func 'funcoeszz zz$func'" >> "$arquivo_aliases"
@@ -774,7 +831,10 @@ zzzz ()
 				cat - >> "$zshrc" <<-EOS
 
 				# $instal_msg
+				# script
 				export ZZPATH=$ZZPATH
+				# pasta zz/
+				export ZZDIR=$ZZDIR
 				source $arquivo_aliases
 				EOS
 
@@ -785,7 +845,7 @@ zzzz ()
 			fi
 
 			# Cria o arquivo de aliases
-			echo > $arquivo_aliases
+			echo > "$arquivo_aliases"
 			for func in $(ZZCOR=0 zzzz | grep -v '^(' | sed 's/,//g')
 			do
 				echo "alias zz$func='funcoeszz zz$func'" >> "$arquivo_aliases"
@@ -826,18 +886,19 @@ zzzz ()
 			fi
 
 			# Formata funções essenciais
-			info_base=$(echo $ZZBASE | sed 's/ /, /g')
+			info_base=$(echo "$ZZBASE" | sed 's/ /, /g')
 
 			# Informações, uma por linha
-			zztool acha '^[^)]*)' "(script) $ZZPATH"
-			zztool acha '^[^)]*)' "( pasta) $ZZDIR"
-			zztool acha '^[^)]*)' "(versão) $ZZVERSAO ($info_utf8)"
-			zztool acha '^[^)]*)' "( cores) $info_cor"
-			zztool acha '^[^)]*)' "(   tmp) $ZZTMP"
-			zztool acha '^[^)]*)' "(bashrc) $info_instalado"
-			zztool acha '^[^)]*)' "( zshrc) $info_instalado_zsh"
-			zztool acha '^[^)]*)' "(  base) $info_base"
-			zztool acha '^[^)]*)' "(  site) $url_site"
+			zztool acha '^[^)]*)' "( script) $ZZPATH"
+			zztool acha '^[^)]*)' "(  pasta) $ZZDIR"
+			zztool acha '^[^)]*)' "( versão) $ZZVERSAO ($info_utf8)"
+			zztool acha '^[^)]*)' "(  cores) $info_cor"
+			zztool acha '^[^)]*)' "(    tmp) $ZZTMP"
+			zztool acha '^[^)]*)' "(browser) $ZZBROWSER"
+			zztool acha '^[^)]*)' "( bashrc) $info_instalado"
+			zztool acha '^[^)]*)' "(  zshrc) $info_instalado_zsh"
+			zztool acha '^[^)]*)' "(   base) $info_base"
+			zztool acha '^[^)]*)' "(   site) $url_site"
 
 			# Lista de todas as funções
 
@@ -847,7 +908,7 @@ zzzz ()
 			then
 				set |
 					sed -n '/^zz[a-z0-9]/ s/ *().*//p' |
-					egrep -v "$(echo $ZZBASE | sed 's/ /|/g')" |
+					egrep -v "$(echo "$ZZBASE" | sed 's/ /|/g')" |
 					sort > "$ZZTMP.on"
 			fi
 
@@ -976,82 +1037,128 @@ zzaleatorio ()
 # Tipos reconhecidos:
 #
 #    --militar | --radio | --fone | --otan | --icao | --ansi
-#                            Alfabeto radiotelefônico internacional
-#    --romano | --latino     A B C D E F...
-#    --royal-navy            Marinha Real - Reino Unido, 1914-1918
-#    --signalese             Primeira Guerra, 1914-1918
-#    --raf24                 Força Aérea Real - Reino Unido, 1924-1942
-#    --raf42                 Força Aérea Real - Reino Unido, 1942-1943
-#    --raf                   Força Aérea Real - Reino Unido, 1943-1956
-#    --us                    Alfabeto militar norte-americano, 1941-1956
-#    --portugal              Lugares de Portugal
-#    --names                 Nomes de pessoas, em inglês
-#    --lapd                  Polícia de Los Angeles (EUA)
-#    --morse                 Código Morse
+#                                   Radiotelefônico internacional
+#    --romano | --latino            A B C D E F...
+#    --royal-navy | --royal         Marinha Real - Reino Unido, 1914-1918
+#    --signalese | --western-front  Primeira Guerra, 1914-1918
+#    --raf24                        Força Aérea Real - Reino Unido, 1924-1942
+#    --raf42                        Força Aérea Real - Reino Unido, 1942-1943
+#    --raf | --raf43                Força Aérea Real - Reino Unido, 1943-1956
+#    --us | --us41                  Militar norte-americano, 1941-1956
+#    --portugal | --pt              Lugares de Portugal
+#    --name | --names               Nomes de pessoas, em inglês
+#    --lapd                         Polícia de Los Angeles (EUA)
+#    --morse                        Código Morse
+#    --german                       Nomes de pessoas, em alemão
+#    --all | --todos                Todos os códigos lado a lado
 #
 # Uso: zzalfabeto [--TIPO] [palavra]
 # Ex.: zzalfabeto --militar
 #      zzalfabeto --militar cambio
+#      zzalfabeto --us --german prossiga
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2008-07-23
-# Versão: 3
+# Versão: 6
 # Licença: GPL
-# Requisitos: zzmaiusculas
+# Requisitos: zzmaiusculas zztrim
 # ----------------------------------------------------------------------------
 zzalfabeto ()
 {
 	zzzz -h alfabeto "$1" && return
 
-	local char letra
-
+	local char letra colunas cab tam
+	local awk_code='
+				BEGIN {FS=":"; if (length(cab)>0) { print cab }}
+				function campo(campos,  i, arr_camp) {
+					split("", arr_camp)
+					qtd_camp = split(campos, arr_camp, " ")
+					for (i=1;i<=qtd_camp;i++) {
+						printf $(arr_camp[i]) (i<qtd_camp?" ":"")
+					}
+					print ""
+				}
+				{ if (length(colunas)>0) { campo(colunas) } else print }'
 	local coluna=1
 	local dados="\
-A:Alpha:Apples:Ack:Ace:Apple:Able/Affirm:Able:Aveiro:Alan:Adam:.-
-B:Bravo:Butter:Beer:Beer:Beer:Baker:Baker:Bragança:Bobby:Boy:-...
-C:Charlie:Charlie:Charlie:Charlie:Charlie:Charlie:Charlie:Coimbra:Charlie:Charles:-.-.
-D:Delta:Duff:Don:Don:Dog:Dog:Dog:Dafundo:David:David:-..
-E:Echo:Edward:Edward:Edward:Edward:Easy:Easy:Évora:Edward:Edward:.
-F:Foxtrot:Freddy:Freddie:Freddie:Freddy:Fox:Fox:Faro:Frederick:Frank:..-.
-G:Golf:George:Gee:George:George:George:George:Guarda:George:George:--.
-H:Hotel:Harry:Harry:Harry:Harry:How:How:Horta:Howard:Henry:....
-I:India:Ink:Ink:Ink:In:Item/Interrogatory:Item:Itália:Isaac:Ida:..
-J:Juliet:Johnnie:Johnnie:Johnnie:Jug/Johnny:Jig/Johnny:Jig:José:James:John:.---
-K:Kilo:King:King:King:King:King:King:Kilograma:Kevin:King:-.-
-L:Lima:London:London:London:Love:Love:Love:Lisboa:Larry:Lincoln:.-..
-M:Mike:Monkey:Emma:Monkey:Mother:Mike:Mike:Maria:Michael:Mary:--
-N:November:Nuts:Nuts:Nuts:Nuts:Nab/Negat:Nan:Nazaré:Nicholas:Nora:-.
-O:Oscar:Orange:Oranges:Orange:Orange:Oboe:Oboe:Ovar:Oscar:Ocean:---
-P:Papa:Pudding:Pip:Pip:Peter:Peter/Prep:Peter:Porto:Peter:Paul:.--.
-Q:Quebec:Queenie:Queen:Queen:Queen:Queen:Queen:Queluz:Quincy:Queen:--.-
-R:Romeo:Robert:Robert:Robert:Roger/Robert:Roger:Roger:Rossio:Robert:Robert:.-.
-S:Sierra:Sugar:Esses:Sugar:Sugar:Sugar:Sugar:Setúbal:Stephen:Sam:...
-T:Tango:Tommy:Toc:Toc:Tommy:Tare:Tare:Tavira:Trevor:Tom:-
-U:Uniform:Uncle:Uncle:Uncle:Uncle:Uncle:Uncle:Unidade:Ulysses:Union:..-
-V:Victor:Vinegar:Vic:Vic:Vic:Victor:Victor:Viseu:Vincent:Victor:...-
-W:Whiskey:Willie:William:William:William:William:William:Washington:William:William:.--
-X:X-ray/Xadrez:Xerxes:X-ray:X-ray:X-ray:X-ray:X-ray:Xavier:Xavier:X-ray:-..-
-Y:Yankee:Yellow:Yorker:Yorker:Yoke/Yorker:Yoke:Yoke:York:Yaakov:Young:-.--
-Z:Zulu:Zebra:Zebra:Zebra:Zebra:Zebra:Zebra:Zulmira:Zebedee:Zebra:--.."
+A:Alpha:Apples:Ack:Ace:Apple:Able/Affirm:Able:Aveiro:Alan:Adam:.-:Anton
+B:Bravo:Butter:Beer:Beer:Beer:Baker:Baker:Bragança:Bobby:Boy:-...:Berta
+C:Charlie:Charlie:Charlie:Charlie:Charlie:Charlie:Charlie:Coimbra:Charlie:Charles:-.-.:Casar
+D:Delta:Duff:Don:Don:Dog:Dog:Dog:Dafundo:David:David:-..:Dora
+E:Echo:Edward:Edward:Edward:Edward:Easy:Easy:Évora:Edward:Edward:.:Emil
+F:Foxtrot:Freddy:Freddie:Freddie:Freddy:Fox:Fox:Faro:Frederick:Frank:..-.:Friedrich
+G:Golf:George:Gee:George:George:George:George:Guarda:George:George:--.:Gustav
+H:Hotel:Harry:Harry:Harry:Harry:How:How:Horta:Howard:Henry:....:Heinrich
+I:India:Ink:Ink:Ink:In:Item/Interrogatory:Item:Itália:Isaac:Ida:..:Ida
+J:Juliet:Johnnie:Johnnie:Johnnie:Jug/Johnny:Jig/Johnny:Jig:José:James:John:.---:Julius
+K:Kilo:King:King:King:King:King:King:Kilograma:Kevin:King:-.-:Kaufmann/Konrad
+L:Lima:London:London:London:Love:Love:Love:Lisboa:Larry:Lincoln:.-..:Ludwig
+M:Mike:Monkey:Emma:Monkey:Mother:Mike:Mike:Maria:Michael:Mary:--:Martha
+N:November:Nuts:Nuts:Nuts:Nuts:Nab/Negat:Nan:Nazaré:Nicholas:Nora:-.:Nordpol
+O:Oscar:Orange:Oranges:Orange:Orange:Oboe:Oboe:Ovar:Oscar:Ocean:---:Otto
+P:Papa:Pudding:Pip:Pip:Peter:Peter/Prep:Peter:Porto:Peter:Paul:.--.:Paula
+Q:Quebec:Queenie:Queen:Queen:Queen:Queen:Queen:Queluz:Quincy:Queen:--.-:Quelle
+R:Romeo:Robert:Robert:Robert:Roger/Robert:Roger:Roger:Rossio:Robert:Robert:.-.:Richard
+S:Sierra:Sugar:Esses:Sugar:Sugar:Sugar:Sugar:Setúbal:Stephen:Sam:...:Samuel/Siegfried
+T:Tango:Tommy:Toc:Toc:Tommy:Tare:Tare:Tavira:Trevor:Tom:-:Theodor
+U:Uniform:Uncle:Uncle:Uncle:Uncle:Uncle:Uncle:Unidade:Ulysses:Union:..-:Ulrich
+V:Victor:Vinegar:Vic:Vic:Vic:Victor:Victor:Viseu:Vincent:Victor:...-:Viktor
+W:Whiskey:Willie:William:William:William:William:William:Washington:William:William:.--:Wilhelm
+X:X-ray/Xadrez:Xerxes:X-ray:X-ray:X-ray:X-ray:X-ray:Xavier:Xavier:X-ray:-..-:Xanthippe/Xavier
+Y:Yankee:Yellow:Yorker:Yorker:Yoke/Yorker:Yoke:Yoke:York:Yaakov:Young:-.--:Ypsilon
+Z:Zulu:Zebra:Zebra:Zebra:Zebra:Zebra:Zebra:Zulmira:Zebedee:Zebra:--..:Zacharias/Zurich"
 
-	# Escolhe o alfabeto a ser utilizado
-	case "$1" in
-		--militar | --radio | --fone | --telefone | --otan | --nato | --icao | --itu | --imo | --faa | --ansi)
-			coluna=2 ; shift ;;
-		--romano | --latino           ) coluna=1  ; shift ;;
-		--royal | --royal-navy        ) coluna=3  ; shift ;;
-		--signalese | --western-front ) coluna=4  ; shift ;;
-		--raf24                       ) coluna=5  ; shift ;;
-		--raf42                       ) coluna=6  ; shift ;;
-		--raf43 | --raf               ) coluna=7  ; shift ;;
-		--us41 | --us                 ) coluna=8  ; shift ;;
-		--pt | --portugal             ) coluna=9  ; shift ;;
-		--name | --names              ) coluna=10 ; shift ;;
-		--lapd                        ) coluna=11 ; shift ;;
-		--morse                       ) coluna=12 ; shift ;;
-	esac
+	# Escolhe o(s) alfabeto(s) a ser(em) utilizado(s)
+	while test "${1#--}" != "$1"
+	do
+		case "$1" in
+			--militar | --radio | --fone | --telefone | --otan | --nato | --icao | --itu | --imo | --faa | --ansi)
+				coluna=2 ; shift ;;
+			--romano | --latino           ) coluna=1     ; shift ;;
+			--royal | --royal-navy        ) coluna=3     ; shift ;;
+			--signalese | --western-front ) coluna=4     ; shift ;;
+			--raf24                       ) coluna=5     ; shift ;;
+			--raf42                       ) coluna=6     ; shift ;;
+			--raf43 | --raf               ) coluna=7     ; shift ;;
+			--us41 | --us                 ) coluna=8     ; shift ;;
+			--pt | --portugal             ) coluna=9     ; shift ;;
+			--name | --names              ) coluna=10    ; shift ;;
+			--lapd                        ) coluna=11    ; shift ;;
+			--morse                       ) coluna=12    ; shift ;;
+			--german                      ) coluna=13    ; shift ;;
+			--all | --todos               )
+				colunas='1 12 2 3 4 5 6 7 8 10 11 13 9'
+				coluna="0"
+				shift
+				break
+			;;
+			*) break ;;
+		esac
+		colunas=$(echo "$colunas $coluna" | zztrim | tr -s ' ,')
+	done
 
-	if test "$1"
+	if test "$colunas" != "$coluna" -a -n "$colunas"
+	then
+		cab='ROMANO MILITAR ROYAL-NAVY SIGNALESE RAF24 RAF42 RAF US PORTUGAL NAMES LAPD MORSE GERMAN'
+		tam='8 14 12 11 9 14 20 9 0 11 9 7 18'
+
+		# Colocando portugal, quando presente, na última coluna sempre
+		# devido a presença dos caracteres especiais nos nomes
+		if zztool grep_var 9 "$colunas"
+		then
+			colunas=$(echo "$colunas" | zztrim | tr -d 9)' 9'
+			colunas=$(echo "$colunas" | tr -s ' ')
+		fi
+
+		# Definindo cabeçalho e espaçamento
+		cab=$(echo "$cab" | tr ' ' ':' | awk -v colunas="$colunas" "$awk_code")
+		tam=$(echo "$tam" | tr ' ' ':' | awk -v colunas="$colunas" "$awk_code" |
+			awk '{ if (NF > 1){ tot=$1;for(i=2;i<=NF;i++) { printf tot ","; tot+=$i } } } END {print ++tot}'
+		)
+
+	fi
+
+	if test -n "$1"
 	then
 		# Texto informado, vamos fazer a conversão
 		# Deixa uma letra por linha e procura seu código equivalente
@@ -1061,18 +1168,22 @@ Z:Zulu:Zebra:Zebra:Zebra:Zebra:Zebra:Zebra:Zulmira:Zebedee:Zebra:--.."
 /g' |
 			while IFS='' read -r char
 			do
-				letra=$(echo "$char" | sed 's/[^A-Z]//g')
+				letra=$(echo "$char" | sed 's/[^A-Z]//g;s/[ÀÁÂÃÄÅÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜÇÑÐ£Ø§Ý]//g')
 				if test -n "$letra"
 				then
-					echo "$dados" | grep "^$letra" | cut -d : -f $coluna
+					echo "$dados" | grep "^$letra" |
+					awk -v colunas="${colunas:-$coluna}" "$awk_code"
 				else
 					test -n "$char" && echo "$char"
 				fi
 			done
 	else
 		# Apenas mostre a tabela
-		echo "$dados" | cut -d : -f $coluna
-	fi
+		echo "$dados" |
+		awk -v colunas="${colunas:-$coluna}" "$awk_code"
+	fi |
+	awk -v cab="$cab" "$awk_code" | tr ' ' '\t' |
+	expand -t "${tam:-8}" | zztrim
 }
 
 # ----------------------------------------------------------------------------
@@ -1098,47 +1209,42 @@ Z:Zulu:Zebra:Zebra:Zebra:Zebra:Zebra:Zebra:Zulmira:Zebedee:Zebra:--.."
 # Desde: 2014-05-23
 # Versão: 4
 # Licença: GPL
-# Requisitos: zzpad zztrim
+# Requisitos: zzpad zztrim zzwc
 # ----------------------------------------------------------------------------
 zzalinhar ()
 {
 	zzzz -h alinhar "$1" && return
 
-	local cache=$(zztool mktemp alinhar)
 	local alinhamento='r'
 	local largura=0
-	local larg_efet linha
+	local larg_efet linha cache
 
 	while test "${1#-}" != "$1"
 	do
 		case "$1" in
-		-l | --left | -e | --esqueda)  alinhamento='r' ;;
-		-r | --right | -d | --direita) alinhamento='l' ;;
-		-c | --center | --centro)      alinhamento='c' ;;
-		-j | --justify | --justificar) alinhamento='j' ;;
+		-l | --left | -e | --esqueda)  alinhamento='r'; shift ;;
+		-r | --right | -d | --direita) alinhamento='l'; shift ;;
+		-c | --center | --centro)      alinhamento='c'; shift ;;
+		-j | --justify | --justificar) alinhamento='j'; shift ;;
 		-w | --width | --largura)
 			zztool testa_numero "$2" && largura="$2" || { zztool erro "Largura inválida: $2"; return 1; }
-			shift
+			shift; shift
 		;;
+		--) shift; break ;;
 		-*) zztool erro "Opção inválida: $1"; return 1 ;;
 		*) break;;
 		esac
-		shift
 	done
 
-	zztool file_stdin "$@" > $cache
+	cache=$(zztool mktemp alinhar)
 
-	larg_efet=$(
-		cat "$cache" |
-		while read linha
-		do
-			echo ${#linha}
-		done |
-		sort -nr |
-		head -1
-	)
+	zztool file_stdin -- "$@" > "$cache"
 
-	test $largura -eq 0 -a $larg_efet -gt $largura && largura=$larg_efet
+	test $(zztrim "$cache" | zzwc -l) -gt 0 || return 1
+
+	larg_efet=$(zzwc -L "$cache")
+
+	test "$largura" -eq 0 -a "${larg_efet:-0}" -gt "$largura" && largura=$larg_efet
 
 	case $alinhamento in
 	'j')
@@ -1147,9 +1253,9 @@ zzalinhar ()
 		sed 's/"/\\"/g' | sed "s/'/\\'/g" |
 		awk -v larg=$largura '
 			# Função para unir os campos e os separadores de campos(" ")
-			function juntar(  str_saida, j) {
+			function juntar(qtde_campos,  str_saida, j) {
 				str_saida=""
-				for ( j=1; j<=length(campos); j++ ) {
+				for ( j=1; j<=qtde_campos; j++ ) {
 					str_saida = str_saida campos[j] espacos[j]
 				}
 				sub(/ *$/, "", str_saida)
@@ -1190,10 +1296,10 @@ zzalinhar ()
 						if ( qtde <= 1 ) { print linha[i] }
 						else {
 							pos_atual = qtde - 1
-							saida = juntar()
+							saida = juntar(qtde)
 							while ( tam_linha(saida) < larg ) {
 								aumentar_int()
-								saida = juntar()
+								saida = juntar(qtde)
 							}
 							print saida
 						}
@@ -1207,7 +1313,7 @@ zzalinhar ()
 
 		cat "$cache" |
 		zztrim -H |
-		zzpad -${alinhamento} $largura
+		zzpad -${alinhamento} "$largura" 2>/dev/null
 	;;
 	esac
 
@@ -1880,6 +1986,7 @@ zzbicho ()
 # Desde: 2011-05-21
 # Versão: 1
 # Licença: GPL
+# Requisitos: zztestar
 # Tags: data
 # ----------------------------------------------------------------------------
 zzbissexto ()
@@ -1894,7 +2001,7 @@ zzbissexto ()
 	# Validação
 	zztool -e testa_ano "$ano" || return 1
 
-	if zztool testa_ano_bissexto "$ano"
+	if zztestar ano_bissexto "$ano"
 	then
 		echo "$ano é bissexto"
 	else
@@ -1910,8 +2017,9 @@ zzbissexto ()
 #
 # Autor: Vinícius Venâncio Leite <vv.leite (a) gmail com>
 # Desde: 2008-10-16
-# Versão: 4
+# Versão: 5
 # Licença: GPL
+# Requisitos: zztestar
 # ----------------------------------------------------------------------------
 zzblist ()
 {
@@ -1923,461 +2031,29 @@ zzblist ()
 
 	test -n "$1" || { zztool -e uso blist; return 1; }
 
-	zztool -e testa_ip "$ip" || return 1
+	zztestar -e ip "$ip" || return 1
 
 	lista=$(
-		$ZZWWWDUMP "${URL}${ip}" |
+		zztool dump "${URL}${ip}" |
 		grep 'Listed' |
-		sed '/ahbl\.org/d;/=/d;/ *Not/d'
+		sed '
+			# Elimina falsos-positivos
+			/ahbl\.org/d
+			/shlink\.org/d
+
+			# Elimina lixos
+			/=/d
+			/ *Not/d
+		'
 	)
 
-	if test $(echo "$lista" | sed '/^ *$/d' | zztool num_linhas) -eq 0
+	if test "$(echo "$lista" | sed '/^ *$/d' | zztool num_linhas)" -eq 0
 	then
 		zztool eco "O IP não está em nenhuma blacklist"
 	else
 		zztool eco "O IP está na(s) seguinte(s) blacklist"
 		echo "$lista" | sed 's/ *Listed//'
 	fi
-}
-
-# ----------------------------------------------------------------------------
-# zzbolsas
-# http://br.finance.yahoo.com
-# Pesquisa índices de bolsas e cotações de ações.
-# Sem parâmetros mostra a lista de bolsas disponíveis (códigos).
-# Com 1 parâmetro:
-#  -l ou --lista: apenas mostra as bolsas disponíveis e seus nomes.
-#  --limpa ou --limpar: exclui todos os arquivos de cache.
-#  commodities: produtos de origem primária nas bolsas.
-#  taxas_fixas ou moedas: exibe tabela de comparação de câmbio (principais).
-#  taxas_cruzadas: exibe a tabela cartesiana do câmbio.
-#  nome_moedas ou moedas_nome: lista códigos e nomes das moedas usadas.
-#  servicos, economia ou politica: mostra notícias relativas a esse assuntos.
-#  noticias: junta as notícias de serviços e economia.
-#  volume: lista ações líderes em volume de negócios na Bovespa.
-#  alta ou baixa: lista as ações nessa condição na BMFBovespa.
-#  "código de bolsa ou ação": mostra sua última cotação.
-#
-# Com 2 parâmetros:
-#  -l e código de bolsa: lista as ações (códigos).
-#  --lista e "código de bolsa": lista as ações com nome e última cotação.
-#  taxas_fixas ou moedas <principais|europa|asia|latina>: exibe tabela de
-#   comparação de câmbio dessas regiões.
-#  "código de bolsa" e um texto: pesquisa-o no nome ou código das ações
-#    disponíveis na bolsa citada.
-#  "código de bolsa ou ação" e data: pesquisa a cotação no dia.
-#  noticias e "código de ação": Noticias relativas a essa ação (só Bovespa)
-#
-# Com 3 parâmetros ou mais:
-#  "código de bolsa ou ação" e 2 datas: pesquisa as cotações nos dias com
-#    comparações entre datas e variações da ação ou bolsa pesquisada.
-#  vs (ou comp) e 2 códigos de bolsas ou ações: faz a comparação entre as duas
-#   ações ou bolsas. Se houver um quarto parâmetro como uma data faz essa
-#   comparação na data especificada. Mas não compara ações com bolsas.
-#
-# Uso: zzbolsas [-l|--lista] [bolsa|ação] [data1|pesquisa] [data2]
-# Ex.: zzbolsas                  # Lista das bolsas (códigos)
-#      zzbolsas -l               # Lista das bolsas (nomes)
-#      zzbolsas -l ^BVSP         # Lista as ações do índice Bovespa (código)
-#      zzbolsas --lista ^BVSP    # Lista as ações do índice Bovespa (nomes)
-#      zzbolsas ^BVSP loja       # Procura ações com "loja" no nome ou código
-#      zzbolsas ^BVSP            # Cotação do índice Bovespa
-#      zzbolsas PETR4.SA         # Cotação das ações da Petrobrás
-#      zzbolsas PETR4.SA 21/12/2010  # Cotação da Petrobrás nesta data
-#      zzbolsas commodities      # Tabela de commodities
-#      zzbolsas alta             # Lista ações em altas na Bovespa
-#      zzbolsas volume           # Lista ações em alta em volume de negócios
-#      zzbolsas taxas_fixas
-#      zzbolsas taxas_cruzadas
-#      zzbolsas noticias sbsp3.sa    # Noticias recentes no mercado da Sabesp
-#      zzbolsas vs petr3.sa vale3.sa # Compara ambas cotações
-#
-# Autor: Itamar <itamarnet (a) yahoo com br>
-# Desde: 2009-10-04
-# Versão: 23
-# Licença: GPL
-# Requisitos: zzmaiusculas zzsemacento zzdatafmt
-# ----------------------------------------------------------------------------
-zzbolsas ()
-{
-	zzzz -h bolsas "$1" && return
-
-	local url='http://br.finance.yahoo.com'
-	local new_york='^NYA ^NYI ^NYY ^NY ^NYL ^NYK'
-	local nasdaq='^IXIC ^BANK ^NBI ^IXCO ^IXF ^INDS ^INSR ^OFIN ^IXTC ^TRAN ^NDX'
-	local sp='^GSPC ^OEX ^MID ^SPSUPX ^SP600'
-	local amex='^XAX ^IIX ^NWX ^XMI'
-	local ind_nac='^IBX50 ^IVBX ^IGCX ^IEE INDX.SA'
-	local cache=$(zztool mktemp bolsas)
-	local bolsa pag pags pag_atual data1 data2 vartemp
-
-	case $# in
-		0)
-			# Lista apenas os códigos das bolsas disponíveis
-			for bolsa in americas europe asia africa
-			do
-				zztool eco "\n$bolsa :"
-				$ZZWWWDUMP "$url/intlindices?e=$bolsa" |
-					sed -n '/Última/,/_/p' | sed '/Componentes,/!d' |
-					awk '{ printf "%s ", $1}';echo
-			done
-
-			zztool eco "\nDow Jones :"
-			$ZZWWWDUMP "$url/usindices" |
-				sed -n '/Última/,/_/p' | sed '/Componentes,/!d' |
-				awk '{ printf "%s ", $1}';echo
-
-			zztool eco "\nNYSE :"
-			for bolsa in $new_york; do printf "%s " "$bolsa"; done;echo
-
-			zztool eco "\nNasdaq :"
-			for bolsa in $nasdaq; do printf "%s " "$bolsa"; done;echo
-
-			zztool eco "\nStandard & Poors :"
-			for bolsa in $sp; do printf "%s " "$bolsa"; done;echo
-
-			zztool eco "\nAmex :"
-			for bolsa in $amex; do printf "%s " "$bolsa"; done;echo
-
-			zztool eco "\nOutros Índices Nacionais :"
-			for bolsa in $ind_nac; do printf "%s " "$bolsa"; done;echo
-		;;
-		1)
-			# Lista os códigos da bolsas e seus nomes
-			case "$1" in
-			#Limpa todos os cache acumulado
-			--limpa| --limpar) rm -f "${cache:-xxxx}.*" ;;
-			-l | --lista)
-				for bolsa in americas europe asia africa
-				do
-					zztool eco "\n$bolsa :"
-					$ZZWWWDUMP "$url/intlindices?e=$bolsa" |
-						sed -n '/Última/,/_/p' | sed '/Componentes,/!d' |
-						sed 's/[0-9]*\.*[0-9]*,[0-9].*//g' |
-						awk '{ printf " %-10s ", $1; for(i=2; i<=NF-1; i++) printf "%s ",$i; print $NF}'
-				done
-
-				zztool eco "\nDow Jones :"
-				$ZZWWWDUMP "$url/usindices" |
-					sed -n '/Última/,/_/p' | sed '/Componentes,/!d' |
-					sed 's/[0-9]*\.*[0-9]*,[0-9].*//g' |
-					awk '{ printf " %-10s ", $1; for(i=2; i<=NF-1; i++) printf "%s ",$i; print $NF}'
-					printf " %-10s " "$dj";$ZZWWWDUMP "$url/q?s=$dj" |
-					sed -n "/($dj)/{p;q;}" | sed "s/^ *//;s/ *($dj)//"
-
-				zztool eco "\nNYSE :"
-				for bolsa in $new_york;
-				do
-					printf " %-10s " "$bolsa";$ZZWWWDUMP "$url/q?s=$bolsa" |
-					sed -n "/($bolsa)/{p;q;}" | sed "s/^ *//;s/ *($bolsa)//"
-				done
-
-				zztool eco "\nNasdaq :"
-				for bolsa in $nasdaq;
-				do
-					printf " %-10s " "$bolsa";$ZZWWWDUMP "$url/q?s=$bolsa" |
-					sed -n "/($bolsa)/{p;q;}" | sed "s/^ *//;s/ *($bolsa)//"
-				done
-
-				zztool eco "\nStandard & Poors :"
-				for bolsa in $sp;
-				do
-					printf " %-10s " "$bolsa";$ZZWWWDUMP "$url/q?s=$bolsa" |
-					sed -n "/($bolsa)/{p;q;}" | sed "s/^ *//;s/ *($bolsa)//"
-				done
-
-				zztool eco "\nAmex :"
-				for bolsa in $amex;
-				do
-					printf " %-10s " "$bolsa";$ZZWWWDUMP "$url/q?s=$bolsa" |
-					sed -n "/($bolsa)/{p;q;}" | sed "s/^ *//;s/ *($bolsa)//"
-				done
-
-				zztool eco "\nOutros Índices Nacionais :"
-				for bolsa in $ind_nac;
-				do
-					printf " %-10s " "$bolsa";$ZZWWWDUMP "$url/q?s=$bolsa" |
-					sed -n "/($bolsa)/{p;q;}" | sed "s/^ *//;s/ *($bolsa)//;s/ *-$//"
-				done
-			;;
-			commodities)
-				zztool eco  "Commodities"
-				$ZZWWWDUMP "$url/moedas/mercado.html" |
-				sed -n '/^Commodities/,/Mais commodities/p' |
-				sed '1d;$d;/^ *$/d;s/CAPTION: //g;s/ *Metais/\
-&/'| sed 's/^   //g'
-			;;
-			taxas_fixas | moedas)
-				zzbolsas $1 principais
-			;;
-			taxas_cruzadas)
-				zztool eco "Taxas Cruzadas"
-				$ZZWWWDUMP "$url/moedas/principais" |
-				sed -n '/CAPTION: Taxas cruzadas/,/Not.cias e coment.rios/p' |
-				sed '1d;/^[[:space:]]*$/d;$d;s/ .ltima transação /                  /g; s, N/D,    ,g; s/           //; s/^  *//'
-			;;
-			moedas_nome | nome_moedas)
-				zztool eco "BRL - Real"
-				zztool eco "USD - Dolar Americano"
-				zztool eco "EUR - Euro"
-				zztool eco "GBP - Libra Esterlina"
-				zztool eco "CHF - Franco Suico"
-				zztool eco "CNH - Yuan Chines"
-				zztool eco "HKD - Dolar decHong Kong"
-				zztool eco "SGD - Dolar de Singapura"
-				zztool eco "MXN - Peso Mexicano"
-				zztool eco "ARS - Peso Argentino"
-				zztool eco "UYU - Peso Uruguaio"
-				zztool eco "CLP - Peso Chileno"
-				zztool eco "PEN - Nuevo Sol (Peru)"
-			;;
-			volume | alta | baixa)
-				case "$1" in
-					volume) pag='actives';;
-					alta)	pag='gainers';;
-					baixa)	pag='losers';;
-				esac
-				zztool eco "Maiores ${1}s"
-				$ZZWWWDUMP "$url/${pag}?e=sa" |
-				sed -n '/Informações relacionadas/,/^[[:space:]]*$/p' |
-				sed '1d;s/Down /-/g;s/ de /-/g;s/Up /+/g;s/Gráfico, .*//g' |
-				sed 's/ *Para *cima */ +/g;s/ *Para *baixo */ -/g' |
-				awk 'BEGIN {
-							printf "%-15s  %-24s  %-24s  %-19s  %-10s\n","Símbolo","Nome","Última Transação","Variação","Volume"
-						}
-					{
-						if (NF > 6) {
-							nome = ""
-							printf "%-15s ", $1;
-							for(i=2; i<=NF-5; i++) {nome = nome sprintf( "%s ", $i)};
-							printf " %-24s ", nome;
-							for(i=NF-4; i<=NF-3; i++) printf " %-8s ", $i;
-							printf "  "
-							printf " %-7s ", $(NF-2); printf " %-9s ", $(NF-1);
-							printf " %11s", $NF
-							print ""
-						}
-					}'
-			;;
-			*)
-				bolsa=$(echo "$1" | zzmaiusculas)
-				# Último índice da bolsa citada ou cotação da ação
-				$ZZWWWDUMP "$url/q?s=$bolsa" |
-				sed -n "/($bolsa)/,/Cotações atrasadas, salvo indicação/p" |
-				sed '{
-						/^[[:space:]]*$/d
-						/IFRAME:/d;
-						/^[[:space:]]*-/d
-						/Adicionar ao portfólio/d
-						/As pessoas que viram/d
-						/Cotações atrasadas, salvo indicação/,$d
-						/Próxima data de anúncio/d
-						s/[[:space:]]\{1,\}/ /g
-						s|p/ *|p/|g
-					}' |
-				zzsemacento | awk -F":" '{if ( $1 != $2 && length($2)>0 ) {printf "%-20s%s\n", $1 ":", $2} else { print $1 } }'
-			;;
-			esac
-		;;
-		2 | 3 | 4)
-			# Lista as ações de uma bolsa especificada
-			bolsa=$(echo "$2" | zzmaiusculas)
-			if test "$1" = "-l" -o "$1" = "--lista" && (zztool grep_var "$bolsa" "$dj $new_york $nasdaq $sp $amex $ind_nac" || zztool grep_var "^" "$bolsa")
-			then
-				pag_final=$($ZZWWWDUMP "$url/q/cp?s=$bolsa" | sed -n '/Primeira/p;/Primeira/q' | sed "s/^ *//g;s/.* of *\([0-9]\{1,\}\) .*/\1/;s/.* de *\([0-9]\{1,\}\) .*/\1/")
-				pags=$(echo "scale=0;($pag_final - 1) / 50" | bc)
-
-				unset vartemp
-				pag=0
-				while test $pag -le $pags
-				do
-					if test "$1" = "--lista"
-					then
-						# Listar as ações com descrição e suas últimas posições
-						$ZZWWWDUMP "$url/q/cp?s=$bolsa&c=$pag" |
-						sed -n 's/^ *//g;/Símbolo /,/^Tudo /p' |
-						sed '/Símbolo /d;/^Tudo /d;/^[ ]*$/d' |
-						sed 's/ *Para *cima */ +/g;s/ *Para *baixo */ -/g' |
-						awk -v pag_awk=$pag '
-						BEGIN { if (pag_awk==0) {printf "%-14s %-54s %-23s %-15s %-10s\n", "Símbolo", "Empresa", "Última Transação", "Variação", "Volume"} }
-						{
-							nome = ""
-							if (NF>=7) {
-								if (index($(NF-3),":") != 0) { ajuste=0; limite = 7 } else { ajuste=2; limite = 9 }
-								if (NF>=limite) {
-									if (ajuste == 0 ) { data_hora = $(NF-3) }
-									else if (ajuste == 2 ) { data_hora = $(NF-5) " " $(NF-4) " " $(NF-3) }
-									for(i=2;i<=(NF-5-ajuste);i++) {nome = nome " " $i }
-									printf "%-13s %-50s %10s %10s %10s %9s %10s\n", $1, nome, $(NF-4-ajuste), data_hora, $(NF-2), $(NF-1), $NF
-								}
-							}
-						}'
-					else
-						# Lista apenas os códigos das ações
-						vartemp=${vartemp}$($ZZWWWDUMP "$url/q/cp?s=$bolsa&c=$pag" |
-						sed -n 's/^ *//g;/Símbolo /,/^Tudo /p' |
-						sed '/Símbolo /d;/^Tudo /d;/^[ ]*$/d' |
-						awk '{printf "%s  ",$1}')
-
-						if test "$pag" = "$pags";then echo $vartemp;fi
-					fi
-					pag=$(($pag+1))
-				done
-
-			# Valores de uma bolsa ou ação em uma data especificada (histórico)
-			elif zztool testa_data $(zzdatafmt "$2" 2>/dev/null)
-			then
-				vartemp=$(zzdatafmt -f "DD MM AAAA DD/MM/AAAA" "$2")
-				dd=$(echo $vartemp | cut -f1 -d ' ')
-				mm=$(echo $vartemp | cut -f2 -d ' ')
-				yyyy=$(echo $vartemp | cut -f3 -d ' ')
-				data1=$(echo $vartemp | cut -f4 -d ' ')
-				unset vartemp
-
-				mm=$(echo "scale=0;${mm}-1" | bc)
-				bolsa=$(echo "$1" | zzmaiusculas)
-					# Emprestando as variaves pag, pags e pag_atual efeito estético apenas
-					pag=$($ZZWWWDUMP "$url/q/hp?s=$bolsa&a=${mm}&b=${dd}&c=${yyyy}&d=${mm}&e=${dd}&f=${yyyy}&g=d" |
-					sed -n "/($bolsa)/p;/Abertura/,/* Preço/p" | sed 's/Data/    /;/* Preço/d' |
-					sed 's/^ */ /g;/Proxima data de anuncio/d')
-
-					echo "$pag" | sed -n '2p' | sed 's/ [A-Z]/\
-\t&/g;s/Enc ajustado/Ajustado/' | sed '/^ *$/d' | awk 'BEGIN { printf "%-13s\n", "Data" } {printf "%-12s\n", $1}' > "${cache}.pags"
-
-					echo "$pag" | sed -n '3p' | cut -f7- -d" " | sed 's/ [0-9]/\
-&/g' | sed '/^ *$/d' | awk 'BEGIN { print "    '$data1'" } {printf "%14s\n", $1}' > "${cache}.pag_atual"
-					echo "$pag" | sed -n '1p'| sed 's/^ *//'
-
-					if test -n "$3" && zztool testa_data $(zzdatafmt "$3")
-					then
-						vartemp=$(zzdatafmt -f "DD MM AAAA DD/MM/AAAA" "$3")
-						dd=$(echo $vartemp | cut -f1 -d ' ')
-						mm=$(echo $vartemp | cut -f2 -d ' ')
-						yyyy=$(echo $vartemp | cut -f3 -d ' ')
-						data2=$(echo $vartemp | cut -f4 -d ' ')
-						mm=$(echo "scale=0;${mm}-1" | bc)
-						unset vartemp
-
-						$ZZWWWDUMP "$url/q/hp?s=$bolsa&a=${mm}&b=${dd}&c=${yyyy}&d=${mm}&e=${dd}&f=${yyyy}&g=d" |
-						sed -n "/($bolsa)/p;/Abertura/,/* Preço/p" | sed 's/Data/    /;/* Preço/d' |
-						sed 's/^ */ /g' | sed -n '3p' | cut -f7- -d" " | sed 's/ [0-9]/\n&/g' |
-						sed '/^ *$/d' | awk 'BEGIN { print "     '$data2'" } {printf " %14s\n", $1}' > "${cache}.pag"
-
-						printf '%b\n' "       Variação\t Var (%)" > "${cache}.vartemp"
-						paste "${cache}.pag_atual" "${cache}.pag" | while read data1 data2
-						do
-							echo "$data1 $data2" | tr -d '.' | tr ',' '.' |
-							awk '{ if (index($1,"/")==0) {printf "%15.2f\t", $2-$1; if ($1 != 0) {printf "%7.2f%\n", (($2-$1)/$1)*100}}}' 2>/dev/null
-						done >> "${cache}.vartemp"
-
-						paste "${cache}.pags" "${cache}.pag_atual" "${cache}.pag" "${cache}.vartemp"
-					else
-						paste "${cache}.pags" "${cache}.pag_atual"
-					fi
-			# Compara duas ações ou bolsas diferentes
-			elif (test "$1" = "vs" -o "$1" = "comp")
-			then
-				if (zztool grep_var "^" "$2" && zztool grep_var "^" "$3")
-				then
-					vartemp="0"
-				elif (! zztool grep_var "^" "$2" && ! zztool grep_var "^" "$3")
-				then
-					vartemp="0"
-				fi
-				if test -n "$vartemp"
-				then
-					# Compara numa data especifica as ações ou bolsas
-					if (test -n "$4" && zztool testa_data $(zzdatafmt "$4"))
-					then
-						zzbolsas "$2" "$4" | sed '/Proxima data de anuncio/d' > "${cache}.pag"
-						vartemp=$(zztool num_linhas ${cache}.pag)
-						zzbolsas "$3" "$4" |
-						sed '/Proxima data de anuncio/d;s/^[[:space:]]*//g;s/[[:space:]]*$//g' |
-						sed '2,$s/^[[:upper:][:space:][:space:]][^0-9]*//g' > "${cache}.temp"
-						sed -n "1,${vartemp}p" "${cache}.temp" > "${cache}.pags"
-					# Ultima cotaçao das açoes ou bolsas comparadas
-					else
-						zzbolsas "$2" | sed '/Proxima data de anuncio/d' > "${cache}.pag"
-						zzbolsas "$3" | sed '/Proxima data de anuncio/d' |
-						sed 's/^[[:space:]]*//g;3,$s/.*:[[:space:]]*//g' > "${cache}.pags"
-					fi
-					# Imprime efetivamente a comparação
-					if test $(awk 'END {print NR}' "${cache}.pag") -ge 4 -a $(awk 'END {print NR}' "${cache}.pags") -ge 4
-					then
-						paste -d"|" "${cache}.pag" "${cache}.pags" |
-						awk -F"|" '{printf "%-42s %25s\n", $1, $2}'
-					fi
-				fi
-			# Noticias relacionadas a uma ação especifica
-			elif (test "$1" = "noticias" -o "$1" = "notícias" && ! zztool grep_var "^" "$2")
-			then
-				$ZZWWWDUMP "$url/q/h?s=$bolsa" |
-				sed -n '/^[[:blank:]]\{1,\}\*.*Agencia.*)$/p;/^[[:blank:]]\{1,\}\*.*at noodls.*)$/p' |
-				sed 's/^[[:blank:]]*//g;s/Agencia/ &/g;s/at noodls/ &/g'
-			elif (test "$1" = "taxas_fixas" || test "$1" = "moedas")
-			then
-				case $2 in
-				asia)
-					url="$url/moedas/asia-pacifico"
-					zztool eco "$(echo $1 | sed 'y/tfm_/TFM /') - Ásia-Pacífico"
-				;;
-				latina)
-					url="$url/moedas/america-latina"
-					zztool eco "$(echo $1 | sed 'y/tfm_/TFM /') - América Latina"
-				;;
-				europa)
-					url="$url/moedas/europa"
-					zztool eco "$(echo $1 | sed 'y/tfm_/TFM /') - Europa"
-				;;
-				principais | *)
-					url="$url/moedas/principais"
-					zztool eco "$(echo $1 | sed 'y/tfm_/TFM /') - Principais"
-				;;
-				esac
-
-				$ZZWWWDUMP "$url" |
-					sed -n '
-						# grepa apenas as linhas das moedas e os títulos
-						/CAPTION: Taxas fixas/,/CAPTION: Taxas cruzadas/ {
-							/^  *[A-Z][A-Z][A-Z]\/[A-Z][A-Z][A-Z]/ p
-							/^  *Par cambial/ p
-						}' |
-					sed '
-						# Remove lixos
-						s/ *Visualização do gráfico//g
-						s/ Inverter pares /                /g
-
-						# A segunda tabela é invertida
-						3,$ s/Par cambial             /Par cambial inv./
-
-						# Diminuição do espaçamento para caber em 80 colunas
-						s/^  *//
-						s/        //
-
-						# Quebra linha antes do título das duas tabelas
-						/^Par cambial/ s/^/\
-/
-						# Apagando linha duplicada com valores em branco
-						/[A-Z]\{3\}\/[A-Z]\{3\} *$/d
-						'
-			else
-				bolsa=$(echo "$1" | zzmaiusculas)
-				pag_final=$($ZZWWWDUMP "$url/q/cp?s=$bolsa" | sed -n '/Primeira/p;/Primeira/q' | sed 's/^ *//g;s/.* of *\([0-9]\{1,\}\) .*/\1/;s/.* de *\([0-9]\{1,\}\) .*/\1/')
-				pags=$(echo "scale=0;($pag_final - 1) / 50" | bc)
-				pag=0
-				while test $pag -le $pags
-				do
-					$ZZWWWDUMP "$url/q/cp?s=$bolsa&c=$pag" |
-					sed -n 's/^ *//g;/Símbolo /,/Primeira/p' |
-					sed '/Símbolo /d;/Primeira/d;/^[ ]*$/d' |
-					grep -i "$2"
-					pag=$(($pag+1))
-				done
-			fi
-		;;
-	esac
-
-	rm -f "${cache:-xxxx}.*"
 }
 
 # ----------------------------------------------------------------------------
@@ -2412,9 +2088,9 @@ zzbolsas ()
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-05-26
-# Versão: 5
+# Versão: 6
 # Licença: GPL
-# Requisitos: zzminusculas zzmaiusculas zzcapitalize zzseq
+# Requisitos: zzminusculas zzmaiusculas zzcapitalize zzseq zztestar
 # ----------------------------------------------------------------------------
 zzbraille ()
 {
@@ -2543,7 +2219,7 @@ _|0|0|0|1|0|1|0|0|1|0|0|1
 		linha2=${linha2}' 00'
 		linha3=${linha3}' 00'
 
-		if zztool testa_numero "$1" || zztool testa_numero_fracionario "$1"
+		if zztestar numero_real "$1"
 		then
 			linha0=${linha0}' ##' # Para indicar que começa um número, nas apontamento abaixo da célula
 			linha1=${linha1}' 01'
@@ -2574,7 +2250,19 @@ _|0|0|0|1|0|1|0|0|1|0|0|1
 				then
 					test $letra = '/' && letra='\/'
 					codigo=$(echo "$caracter" | sed -n "/^[$letra]/p")
-					if test -n $codigo
+					if zztool grep_var / "$letra"
+					then
+						linha0="${linha0}-( ${letra_original} )"
+						linha1=$(awk -v linha="$linha1" 'BEGIN {print linha " 00 00"}')
+						linha2=$(awk -v linha="$linha2" 'BEGIN {print linha " 00 10"}')
+						linha3=$(awk -v linha="$linha3" 'BEGIN {print linha " 01 00"}')
+					elif test $(printf ${letra}) = '\'
+					then
+						linha0=${linha0}'-( '${letra_original}' )'
+						linha1=${linha1}' '$(awk 'BEGIN {print "00 00"}')
+						linha2=${linha2}' '$(awk 'BEGIN {print "01 00"}')
+						linha3=${linha3}' '$(awk 'BEGIN {print "00 10"}')
+					elif test -n "$codigo"
 					then
 						letra_original=$(echo $letra_original | tr '#' ' ')
 						linha0=${linha0}'('${letra_original}')'
@@ -2582,19 +2270,11 @@ _|0|0|0|1|0|1|0|0|1|0|0|1
 						linha2=${linha2}' '$(echo $codigo | awk -F'|' '{print $3 $6}')
 						linha3=${linha3}' '$(echo $codigo | awk -F'|' '{print $4 $7}')
 					else
-						if test $letra = '\'
-						then
-							linha0=${linha0}'-( '${letra_original}' )'
-							linha1=${linha1}' '$(awk 'BEGIN {print "00 00"}')
-							linha2=${linha2}' '$(awk 'BEGIN {print "01 00"}')
-							linha3=${linha3}' '$(awk 'BEGIN {print "00 10"}')
-						else
-							codigo=$(echo "$caracter_esp" | sed -n "/^[$letra]/p")
-							test ${#codigo} -ge 25 && linha0=${linha0}'-( '${letra_original}' )'|| linha0=${linha0}'('${letra_original}')'
-							linha1=${linha1}' '$(echo $codigo | awk -F'|' '{print $2 $5, $8 $11}')
-							linha2=${linha2}' '$(echo $codigo | awk -F'|' '{print $3 $6, $9 $12}')
-							linha3=${linha3}' '$(echo $codigo | awk -F'|' '{print $4 $7, $10 $13}')
-						fi
+						codigo=$(echo "$caracter_esp" | sed -n "/^[$letra]/p")
+						test ${#codigo} -ge 25 && linha0=${linha0}'-( '${letra_original}' )'|| linha0=${linha0}'('${letra_original}')'
+						linha1=${linha1}' '$(echo $codigo | awk -F'|' '{print $2 $5, $8 $11}')
+						linha2=${linha2}' '$(echo $codigo | awk -F'|' '{print $3 $6, $9 $12}')
+						linha3=${linha3}' '$(echo $codigo | awk -F'|' '{print $4 $7, $10 $13}')
 					fi
 				fi
 			done
@@ -2623,9 +2303,6 @@ _|0|0|0|1|0|1|0|0|1|0|0|1
 # http://esporte.uol.com.br/
 # Mostra a tabela atualizada do Campeonato Brasileiro - Série A, B, C ou D.
 # Se for fornecido um numero mostra os jogos da rodada, com resultados.
-# Com argumento -l lista os todos os clubes da série A e B.
-# Se o argumento -l for seguido do nome do clube, lista todos os jogos já
-# ocorridos do clube desde o começo do ano de qualquer campeonato.
 #
 # Nomenclatura:
 #   PG  - Pontos Ganhos
@@ -2638,19 +2315,17 @@ _|0|0|0|1|0|1|0|0|1|0|0|1
 #   SG  - Saldo de Gols
 #   (%) - Aproveitamento (pontos)
 #
-# Uso: zzbrasileirao [a|b|c] [numero rodada] ou zzbrasileirao -l [nome clube]
+# Uso: zzbrasileirao [a|b|c|d] [numero rodada]
 # Ex.: zzbrasileirao
 #      zzbrasileirao a
 #      zzbrasileirao b
 #      zzbrasileirao c
 #      zzbrasileirao 27
 #      zzbrasileirao b 12
-#      zzbrasileirao -l
-#      zzbrasileirao -l portuguesa
 #
 # Autor: Alexandre Brodt Fernandes, www.xalexandre.com.br
 # Desde: 2011-05-28
-# Versão: 22
+# Versão: 24
 # Licença: GPL
 # Requisitos: zzecho zzpad
 # ----------------------------------------------------------------------------
@@ -2658,7 +2333,7 @@ zzbrasileirao ()
 {
 	zzzz -h brasileirao "$1" && return
 
-	test $(date +%Y%m%d) -lt 20150509 && { zztool erro "Brasileirão 2015 só a partir de 9 de Maio."; return 1; }
+	test $(date +%Y%m%d) -lt 20180414 && { zztool erro "Campeonato Brasileiro 2018 só a partir de 14 de Abril."; return 1; }
 
 	local rodada serie ano time1 time2 horario linha num_linha
 	local url="http://esporte.uol.com.br/futebol"
@@ -2680,18 +2355,26 @@ zzbrasileirao ()
 	if test -n "$rodada"
 	then
 		zztool testa_numero $rodada || { zztool -e uso brasileirao; return 1; }
-		$ZZWWWDUMP "$url" |
+		zztool dump "$url" |
 		sed -n "/Rodada ${rodada}$/,/\(Rodada\|^ *$\)/p" |
 		sed '
 		/Rodada /d
 		s/^ *//
-		/[0-9]h[0-9]/{s/pós[ -]jogo//; s/\(h[0-9][0-9]\).*/\1/;}
-		s/[A-Z][A-Z][A-Z]//
+		/[0-9]h[0-9]/{s/pós[ -]jogo *//; s/\(h[0-9][0-9]\).*/\1/;}
+		s/ [A-Z][A-Z][A-Z]$//
 		s/ *__*//' |
 		awk '
-			NR % 3 == 1 { time1=$0 }
-			NR % 3 == 2 { if ($NF ~ /^[0-9]$/) { reserva=$NF " "; $NF=""; } else reserva=""; time2=reserva $0 }
-			NR % 3 == 0 { sub(/  *$/,""); print time1 "|" time2 "|" $0 }
+			NR % 3 ~ /^[12]$/ {
+				if ($1 ~ /^[0-9-]{1,}$/) {
+					placar[NR % 3]=$1; $1=""
+				}
+				sub(/^ */,"");sub(/ *$/,"")
+				time[NR % 3]=" " $0 " "
+			}
+			NR % 3 == 0 {
+				sub(/  *$/,""); print time[1] placar[1] "|" placar[2] time[2] "|" $0
+				placar[1]="";placar[2]=""
+			}
 		' |
 		sed '/^ *$/d' |
 		while read linha
@@ -2705,11 +2388,14 @@ zzbrasileirao ()
 		zztool eco $(echo "Série $serie" | tr 'abcd' 'ABCD')
 		if test "$serie" = "c" -o "$serie" = "d"
 		then
-			$ZZWWWDUMP "$url" |
-			sed -n "/Grupo \(A\|B\)/,/Rodada 1/{s/^/_/;s/.*Rodada.*//;s/°/./;p;}" |
+			zztool dump "$url" |
+			sed -n "/Grupo [AB][1-9]\{0,2\} *PG .*/,/Rodada 1 *$/{s/^/_/;s/.*Rodada .*//;s/°/./;p;}" |
 			while read linha
 			do
-				if echo "$linha" | grep -E '[12]\.' >/dev/null
+				if echo "$linha" | grep -E '[12]\.' >/dev/null && test "$serie" = "c"
+				then
+					zzecho -f verde -l preto "$linha"
+				elif echo "$linha" | grep '1\.' >/dev/null && test "$serie" = "d"
 				then
 					zzecho -f verde -l preto "$linha"
 				elif echo "$linha" | grep -E '[34]\.' >/dev/null && test "$serie" = "c"
@@ -2723,19 +2409,32 @@ zzbrasileirao ()
 				fi
 			done |
 			tr -d _
-			zzecho -f verde -l preto " Quartas de Final "
-			test "$serie" = "c" && zzecho -f vermelho -l preto " Rebaixamento     "
+			if test "$serie" = "c"
+			then
+				zzecho -f verde -l preto " Quartas de Final "
+				zzecho -f vermelho -l preto "   Rebaixamento   "
+			else
+				zzecho -f verde -l preto " Segunda Fase "
+			fi
 		else
 			num_linha=0
-			$ZZWWWDUMP "$url" |
-			sed -n "/^ *Classificação *PG/,/20°/{s/^/_/;s/°/./;p}" |
+			zztool dump "$url" |
+			sed -n "/^ *Classificação *PG/,/20°/{ s/^/_/; s/°/./; p; }" |
 			while read linha
 			do
 				linha=$(echo "$linha" | awk '{pontos=sprintf("%3d", $NF);sub(/[0-9]+$/,pontos);print}')
 				num_linha=$((num_linha + 1))
 				case $num_linha in
 					[2-5]) zzecho -f verde -l preto "$linha";;
-					[6-9] | 1[0-3])
+					[67])
+						if test "$serie" = "a"
+						then
+							zzecho -f verde -l preto "$linha"
+						else
+							echo "$linha"
+						fi
+					;;
+					[89] | 1[0-3])
 						if test "$serie" = "a"
 						then
 							zzecho -f ciano -l preto "$linha"
@@ -2872,6 +2571,152 @@ zzbyte ()
 }
 
 # ----------------------------------------------------------------------------
+# zzcalculaip
+# Calcula os endereços de rede e broadcast à partir do IP e máscara da rede.
+# Obs.: Se não especificada, será usada a máscara padrão (RFC 1918) ou 24.
+# Uso: zzcalculaip ip [netmask]
+# Ex.: zzcalculaip 127.0.0.1 24
+#      zzcalculaip 10.0.0.0/8
+#      zzcalculaip 192.168.10.0 255.255.255.240
+#      zzcalculaip 10.10.10.0
+#
+# Autor: Thobias Salazar Trevisan, www.thobias.org
+# Desde: 2005-09-01
+# Versão: 2
+# Licença: GPL
+# Requisitos: zzconverte zztestar
+# ----------------------------------------------------------------------------
+zzcalculaip ()
+{
+	zzzz -h calculaip "$1" && return
+
+	local endereco mascara rede broadcast
+	local mascara_binario mascara_decimal mascara_ip
+	local i ip1 ip2 ip3 ip4 nm1 nm2 nm3 nm4 componente
+
+	# Verificação dos parâmetros
+	test $# -eq 0 -o $# -gt 2 && { zztool -e uso calculaip; return 1; }
+
+	# Obtém a máscara da rede (netmask)
+	if zztool grep_var / "$1"
+	then
+		endereco=${1%/*}
+		mascara="${1#*/}"
+	else
+		endereco=$1
+
+		# Use a máscara informada pelo usuário ou a máscara padrão
+		if test $# -gt 1
+		then
+			mascara=$2
+		else
+			# A máscara padrão é determinada pela RFC 1918 (valeu jonerworm)
+			# http://tools.ietf.org/html/rfc1918
+			#
+			#   10.0.0.0    - 10.255.255.255  (10/8 prefix)
+			#   172.16.0.0  - 172.31.255.255  (172.16/12 prefix)
+			#   192.168.0.0 - 192.168.255.255 (192.168/16 prefix)
+			#
+			case "$1" in
+				10.*        ) mascara=8  ;;
+				172.1[6-9].*) mascara=12 ;;
+				172.2?.*    ) mascara=12 ;;
+				172.3[01].* ) mascara=12 ;;
+				192.168.*   ) mascara=16 ;;
+				127.*       ) mascara=8  ;;
+				*           ) mascara=24 ;;
+			esac
+		fi
+	fi
+
+	# Verificações básicas
+	if ! (
+		zztestar ip $mascara || (
+		zztool testa_numero $mascara && test $mascara -le 32))
+	then
+		zztool erro "Máscara inválida: $mascara"
+		return 1
+	fi
+	zztestar -e ip $endereco || return 1
+
+	# Guarda os componentes da máscara em $1, $2, ...
+	# Ou é um ou quatro componentes: 24 ou 255.255.255.0
+	set - $(echo $mascara | tr . ' ')
+
+	# Máscara no formato NN
+	if test $# -eq 1
+	then
+		# Converte de decimal para binário
+		# Coloca N números 1 grudados '1111111' (N=$1)
+		# e completa com zeros à direita até 32, com pontos:
+		# $1=12 vira 11111111.11110000.00000000.00000000
+		mascara=$(printf "%$1s" 1 | tr ' ' 1)
+		mascara=$(
+			printf '%-32s' $mascara |
+			tr ' ' 0 |
+			sed 's/./&./24 ; s/./&./16 ; s/./&./8'
+		)
+	fi
+
+	# Conversão de decimal para binário nos componentes do IP e netmask
+	for i in 1 2 3 4
+	do
+		componente=$(echo $endereco | cut -d'.' -f $i)
+		eval ip$i=$(printf '%08d' $(zzconverte db $componente))
+
+		componente=$(echo $mascara | cut -d'.' -f $i)
+		if test -n "$2"
+		then
+			eval nm$i=$(printf '%08d' $(zzconverte db $componente))
+		else
+			eval nm$i=$componente
+		fi
+	done
+
+	# Uma verificação na máscara depois das conversões
+	mascara_binario=$nm1$nm2$nm3$nm4
+	if ! (
+		zztestar binario $mascara_binario &&
+		test ${#mascara_binario} -eq 32)
+	then
+		zztool erro 'Máscara inválida'
+		return 1
+	fi
+
+	mascara_decimal=$(echo $mascara_binario | tr -d 0)
+	mascara_decimal=${#mascara_decimal}
+	mascara_ip=$((2#$nm1)).$((2#$nm2)).$((2#$nm3)).$((2#$nm4))
+
+	echo "End. IP  : $endereco"
+	echo "Mascara  : $mascara_ip = $mascara_decimal"
+
+	rede=$(( ((2#$ip1$ip2$ip3$ip4)) & ((2#$nm1$nm2$nm3$nm4)) ))
+	i=$(echo $nm1$nm2$nm3$nm4 | tr 01 10)
+	broadcast=$(($rede | ((2#$i)) ))
+
+	# Cálculo do endereço de rede
+	endereco=""
+	for i in 1 2 3 4
+	do
+		ip1=$((rede & 255))
+		rede=$((rede >> 8))
+		endereco="$ip1.$endereco"
+	done
+
+	echo "Rede     : ${endereco%.} / $mascara_decimal"
+
+	# Cálculo do endereço de broadcast
+	endereco=''
+	for i in 1 2 3 4
+	do
+		ip1=$((broadcast & 255))
+		broadcast=$((broadcast >> 8))
+		endereco="$ip1.$endereco"
+	done
+	echo "Broadcast: ${endereco%.}"
+}
+
+# ----------------------------------------------------------------------------
 # zzcalcula
 # Calculadora.
 # Wrapper para o comando bc, que funciona no formato brasileiro: 1.234,56.
@@ -2954,152 +2799,6 @@ zzcalcula ()
 		s/\([0-9]\)\([0-9][0-9][0-9][,.]\)/\1.\2/
 		t loop
 	'
-}
-
-# ----------------------------------------------------------------------------
-# zzcalculaip
-# Calcula os endereços de rede e broadcast à partir do IP e máscara da rede.
-# Obs.: Se não especificada, será usada a máscara padrão (RFC 1918) ou 24.
-# Uso: zzcalculaip ip [netmask]
-# Ex.: zzcalculaip 127.0.0.1 24
-#      zzcalculaip 10.0.0.0/8
-#      zzcalculaip 192.168.10.0 255.255.255.240
-#      zzcalculaip 10.10.10.0
-#
-# Autor: Thobias Salazar Trevisan, www.thobias.org
-# Desde: 2005-09-01
-# Versão: 2
-# Licença: GPL
-# Requisitos: zzconverte
-# ----------------------------------------------------------------------------
-zzcalculaip ()
-{
-	zzzz -h calculaip "$1" && return
-
-	local endereco mascara rede broadcast
-	local mascara_binario mascara_decimal mascara_ip
-	local i ip1 ip2 ip3 ip4 nm1 nm2 nm3 nm4 componente
-
-	# Verificação dos parâmetros
-	test $# -eq 0 -o $# -gt 2 && { zztool -e uso calculaip; return 1; }
-
-	# Obtém a máscara da rede (netmask)
-	if zztool grep_var / "$1"
-	then
-		endereco=${1%/*}
-		mascara="${1#*/}"
-	else
-		endereco=$1
-
-		# Use a máscara informada pelo usuário ou a máscara padrão
-		if test $# -gt 1
-		then
-			mascara=$2
-		else
-			# A máscara padrão é determinada pela RFC 1918 (valeu jonerworm)
-			# http://tools.ietf.org/html/rfc1918
-			#
-			#   10.0.0.0    - 10.255.255.255  (10/8 prefix)
-			#   172.16.0.0  - 172.31.255.255  (172.16/12 prefix)
-			#   192.168.0.0 - 192.168.255.255 (192.168/16 prefix)
-			#
-			case "$1" in
-				10.*        ) mascara=8  ;;
-				172.1[6-9].*) mascara=12 ;;
-				172.2?.*    ) mascara=12 ;;
-				172.3[01].* ) mascara=12 ;;
-				192.168.*   ) mascara=16 ;;
-				127.*       ) mascara=8  ;;
-				*           ) mascara=24 ;;
-			esac
-		fi
-	fi
-
-	# Verificações básicas
-	if ! (
-		zztool testa_ip $mascara || (
-		zztool testa_numero $mascara && test $mascara -le 32))
-	then
-		zztool erro "Máscara inválida: $mascara"
-		return 1
-	fi
-	zztool -e testa_ip $endereco || return 1
-
-	# Guarda os componentes da máscara em $1, $2, ...
-	# Ou é um ou quatro componentes: 24 ou 255.255.255.0
-	set - $(echo $mascara | tr . ' ')
-
-	# Máscara no formato NN
-	if test $# -eq 1
-	then
-		# Converte de decimal para binário
-		# Coloca N números 1 grudados '1111111' (N=$1)
-		# e completa com zeros à direita até 32, com pontos:
-		# $1=12 vira 11111111.11110000.00000000.00000000
-		mascara=$(printf "%$1s" 1 | tr ' ' 1)
-		mascara=$(
-			printf '%-32s' $mascara |
-			tr ' ' 0 |
-			sed 's/./&./24 ; s/./&./16 ; s/./&./8'
-		)
-	fi
-
-	# Conversão de decimal para binário nos componentes do IP e netmask
-	for i in 1 2 3 4
-	do
-		componente=$(echo $endereco | cut -d'.' -f $i)
-		eval ip$i=$(printf '%08d' $(zzconverte db $componente))
-
-		componente=$(echo $mascara | cut -d'.' -f $i)
-		if test -n "$2"
-		then
-			eval nm$i=$(printf '%08d' $(zzconverte db $componente))
-		else
-			eval nm$i=$componente
-		fi
-	done
-
-	# Uma verificação na máscara depois das conversões
-	mascara_binario=$nm1$nm2$nm3$nm4
-	if ! (
-		zztool testa_binario $mascara_binario &&
-		test ${#mascara_binario} -eq 32)
-	then
-		zztool erro 'Máscara inválida'
-		return 1
-	fi
-
-	mascara_decimal=$(echo $mascara_binario | tr -d 0)
-	mascara_decimal=${#mascara_decimal}
-	mascara_ip=$((2#$nm1)).$((2#$nm2)).$((2#$nm3)).$((2#$nm4))
-
-	echo "End. IP  : $endereco"
-	echo "Mascara  : $mascara_ip = $mascara_decimal"
-
-	rede=$(( ((2#$ip1$ip2$ip3$ip4)) & ((2#$nm1$nm2$nm3$nm4)) ))
-	i=$(echo $nm1$nm2$nm3$nm4 | tr 01 10)
-	broadcast=$(($rede | ((2#$i)) ))
-
-	# Cálculo do endereço de rede
-	endereco=""
-	for i in 1 2 3 4
-	do
-		ip1=$((rede & 255))
-		rede=$((rede >> 8))
-		endereco="$ip1.$endereco"
-	done
-
-	echo "Rede     : ${endereco%.} / $mascara_decimal"
-
-	# Cálculo do endereço de broadcast
-	endereco=''
-	for i in 1 2 3 4
-	do
-		ip1=$((broadcast & 255))
-		broadcast=$((broadcast >> 8))
-		endereco="$ip1.$endereco"
-	done
-	echo "Broadcast: ${endereco%.}"
 }
 
 # ----------------------------------------------------------------------------
@@ -3265,208 +2964,72 @@ zzcarnaval ()
 }
 
 # ----------------------------------------------------------------------------
-# zzcbn
-# http://cbn.globoradio.com.br
-# Busca e toca os últimos comentários dos comentaristas da radio CBN.
-# Uso: zzcbn [--audio] [num_audio] -c COMENTARISTA [-d data] ou  zzcbn --lista
-# Ex.: zzcbn -c max-gehringer -d ontem
-#      zzcbn -c juca-kfouri -d 13/05/09
-#      zzcbn -c miriam
-#      zzcbn --audio 2 -c  mario-sergio-cortella
-#
-# Autor: Rafael Machado Casali <rmcasali (a) gmail com>
-# Desde: 2009-04-16
-# Versão: 6
-# Licença: GPL
-# Requisitos: zzecho zzplay zzcapitalize zzdatafmt zzxml
-# ----------------------------------------------------------------------------
-zzcbn ()
-{
-	zzzz -h cbn "$1" && return
-
-	local cache=$(zztool cache cbn)
-	local url='http://cbn.globoradio.globo.com'
-	local audio=0
-	local num_audio=1
-	local nome comentarista link fonte rss podcast ordem data_coment data_audio
-
-	#Verificacao dos parâmetros
-	test -n "$1" || { zztool -e uso cbn; return 1; }
-
-	# Cache com parametros para nomes e links
-	if ! test -s "$cache" || test $(tail -n 1 "$cache") != $(date +%F)
-	then
-		$ZZWWWHTML "$url" |
-		sed -n '/lista-menu-item comentaristas/,/lista-menu-item boletins/p' |
-		zzxml --tag a |
-		sed -n '/http:..cbn.globoradio.globo.com.comentaristas./{s/.*="//;s/">//;/-e-/d;p;}' |
-		awk -F "/" '{url = $0;gsub(/-/," ", $6); gsub(/\.htm/,"", $6);printf "%s;%s;%s\n", $6, $5, url }'|
-		while read linha
-		do
-			nome=$(echo "$linha" | cut -d ";" -f 1 | zzcapitalize )
-			comentarista=$(echo "$linha" | cut -d ";" -f 2 )
-			link=$(echo "$linha" | cut -d ";" -f 3 )
-			fonte=$($ZZWWWHTML "$link")
-			rss=$(
-				echo "$fonte" |
-				grep 'cbn/rss' |
-				sed 's/.*href="//;s/".*//'
-			)
-			podcast=$(
-				echo "$fonte" |
-				grep 'cbn/podcast' |
-				sed 's/.*href="//;s/".*//'
-			)
-			echo "$nome | $comentarista | $rss | $podcast"
-		done > "$cache"
-		zzdatafmt --iso hoje >> "$cache"
-	fi
-
-	# Listagem dos comentaristas
-	if test "$1" = "--lista"
-	then
-		sed '$d' "$cache" | awk -F " [|] " '{print $2 "\t => " $1}' | expand -t 28
-		return
-	fi
-
-# Opções de linha de comando
-	while test "${1#-}" != "$1"
-	do
-		case "$1" in
-			-c)
-				comentarista="$2"
-				shift
-				shift
-			;;
-			-d)
-				data_coment=$(zzdatafmt --en -f "SSS, DD MMM AAAA" "$2")
-				data_audio=$(zzdatafmt -f "_AAMMDD" "$2")
-				shift
-				shift
-			;;
-			--audio)
-				audio=1
-				shift
-				if test -n "$1"
-				then
-					if zztool testa_numero "$1"
-					then
-						num_audio="$1"
-						shift
-					fi
-				fi
-			;;
-			*)
-				zztool erro "Opção inválida!!"
-				return 1
-			;;
-		esac
-	done
-
-	# Audio ou comentários feitos pelo comentarista selecionado
-	if test "$audio" -eq 1
-	then
-		podcast=$(
-			sed -n "/$comentarista/p" "$cache" |
-			cut -d'|' -f 4| tr -d ' '
-		)
-		if test -n "$podcast"
-		then
-			podcast=$($ZZWWWHTML "$podcast" | grep 'media:content')
-			zztool eco "Áudios diponíveis:"
-			echo "$podcast" |
-			sed 's/.*_//; s/\.mp3.*//; s/\(..\)\(..\)\(..\)/\3\/\2\/20\1/' |
-			awk '{ print NR ".", $0}'
-
-			podcast=$(
-				echo "$podcast" |
-				sed -n "${num_audio}p" |
-				sed 's|.*audio=|http://download.sgr.globo.com/sgr-mp3/cbn/|' |
-				sed 's/\.mp3.*/.mp3/'
-			)
-
-			test -n "$podcast" && zzplay "$podcast" mplayer || zzecho -l vermelho "Sem comentários em áudio."
-		else
-			zzecho -l vermelho "Sem comentários em áudio."
-		fi
-
-	else
-		rss=$(
-			sed -n "/$comentarista/p" "$cache" |
-			cut -d'|' -f 3 | tr -d ' '
-		)
-
-		if test -n "$rss"
-		then
-			$ZZWWWHTML "$rss" |
-			zzxml --tag item |
-			zzxml --tag title --tag description --tag pubDate |
-			sed 's/<title>/-----/' |
-			zzxml --untag |
-			sed '/^$/d; s/ [0-2][0-9]:.*//' |
-			if test -n "$data_coment"
-			then
-				grep -B 3 "$data_coment"
-			else
-				cat -
-			fi
-		else
-			zzecho -l vermelho "Sem comentários."
-		fi
-	fi
-}
-
-# ----------------------------------------------------------------------------
 # zzcep
 # http://www.achecep.com.br
 # Busca o CEP de qualquer rua de qualquer cidade do país ou vice-versa.
-# Pode-se fornecer apenas o CEP, ou o estado com endereço.
-# Uso: zzcep <estado endereço | CEP>
-# Ex.: zzcep SP Rua Santa Ifigênia
+# Pode-se fornecer apenas o CEP, ou o endereço com estado.
+# Uso: zzcep <endereço estado| CEP>
+# Ex.: zzcep Rua Santa Ifigênia, São Paulo, SP
 #      zzcep 01310-000
 #
-# Autor: Aurélio Marinho Jargas, www.aurelio.net
+# Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2000-11-08
-# Versão: 2
+# Versão: 4
 # Licença: GPL
+# Requisitos: zzsemacento zzminusculas zzxml zzjuntalinhas zzcolunar zztrim zzpad
 # ----------------------------------------------------------------------------
 zzcep ()
 {
 	zzzz -h cep "$1" && return
 
-	local r e query
-	local url='http://www.achecep.com.br'
+	local end cepend pagina1 pages
+	local url='http://cep.guiamais.com.br'
 
 	# Verificação dos parâmetros
 	test -n "$1" || { zztool -e uso cep; return 1; }
 
 	# Testando se parametro é o CEP
-	echo "$1" | tr -d '-' | grep -E '[0-9]{8}' > /dev/null
-	if test $? -eq 0
+	if echo "$1" | grep -E '^[0-9]{5}-[0-9]{3}$' > /dev/null
 	then
-		query=$(echo "q=$1" | tr -d '-')
+		end=0
+		cepend="$1"
+	else
+		end=1
+		cepend=$(echo "$*" | zzsemacento | zzminusculas | sed "s/, */-/g;$ZZSEDURL")
 	fi
 
-	# Conferindo se é sigla do Estado e endereço
-	if test -z $query && test -n "$2"
+	# A primeira página ou endereço das várias páginas
+	pagina1=$(zztool source "${url}/busca?word=${cepend}")
+
+	if echo "$pagina1" | grep 'sr-only' >/dev/null
 	then
-		echo $1 | grep -E '[a-zA-Z]{2}' > /dev/null
-		if test $? -eq 0
+		for pages in $(echo "$pagina1" | grep 'sr-only' | sed 's/.*href="//;s/".*//')
+		do
+			zztool source "$pages"
+		done
+	else
+		echo "$pagina1"
+	fi |
+		zzxml --tag th --tag td |
+		zzjuntalinhas -i '<td' -f '</td>' -d ' ' |
+		zzjuntalinhas -i '<th' -f '</th>' -d ' ' |
+		sed 's|> </a>|> - </a>|g' |
+		zzxml --untag |
+		if test "$end" -eq 1
 		then
-			e="$1"
-			shift
-			r=$(echo "$*"| sed "$ZZSEDURL")
-			query="uf=${e}&q=$r"
+			awk 'NR % 5 != 4' |
+			zzcolunar -s '|' -z 4
 		else
-			zztool -e uso cep; return 1;
-		fi
-	fi
-
-	# Testando se formou a query string
-	test -n "$query" || { zztool -e uso cep; return 1; }
-
-	echo "$query" | $ZZWWWPOST "$url" |
-	sed -n '/^[[:blank:]]*CEP/,/^[[:blank:]]*$/p'| sed 's/^ *//g;$d'
+			awk 'NR % 5 != 4 && NR % 5 != 0' |
+			zzcolunar -s '|' -z 3
+		fi |
+		sed '2,$ { /LOGRADOURO/d; }' |
+		zztrim | tr -s ' ' |
+		while IFS="|" read logradouro bairro cidade cep
+		do
+			echo "$(zzpad 65 $logradouro) $(zzpad 25 $bairro) $(zzpad 30 $cidade) $cep"
+		done |
+		zztrim
 }
 
 # ----------------------------------------------------------------------------
@@ -3492,13 +3055,14 @@ zzchavepgp ()
 	# Verificação dos parâmetros
 	test -n "$1" || { zztool -e uso chavepgp; return 1; }
 
-	$ZZWWWDUMP "http://pgp.mit.edu:11371/pks/lookup?search=$padrao&op=index" |
+	zztool dump "http://pgp.mit.edu:11371/pks/lookup?search=$padrao&op=index" |
 		sed 1,2d |
 		sed '
 			# Remove linhas em branco
 			/^$/ d
 			# Remove linhas ____________________
-			/^ *___*$/ d'
+			/^ *___*$/ d
+			/^ *---*$/ d'
 }
 
 # ----------------------------------------------------------------------------
@@ -3551,7 +3115,6 @@ zzchecamd5 ()
 
 # ----------------------------------------------------------------------------
 # zzcidade
-# http://pt.wikipedia.org/wiki/Lista_de_munic%C3%ADpios_do_Brasil
 # Lista completa com todas as 5.500+ cidades do Brasil, com busca.
 # Obs.: Sem argumentos, mostra uma cidade aleatória.
 #
@@ -3563,15 +3126,15 @@ zzchecamd5 ()
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2013-02-21
-# Versão: 3
+# Versão: 4
 # Licença: GPL
-# Requisitos: zzlinha
+# Requisitos: zzlinha zztrim zzlimpalixo
 # ----------------------------------------------------------------------------
 zzcidade ()
 {
 	zzzz -h cidade "$1" && return
 
-	local url='http://pt.wikipedia.org/wiki/Lista_de_munic%C3%ADpios_do_Brasil'
+	local url='https://pt.wikipedia.org/wiki/Lista_de_munic%C3%ADpios_do_Brasil'
 	local cache=$(zztool cache cidade)
 	local padrao="$*"
 
@@ -3579,7 +3142,11 @@ zzcidade ()
 	if ! test -s "$cache"
 	then
 		# Exemplo:^     * Aracaju (SE)
-		$ZZWWWDUMP "$url" | sed -n 's/^  *\* \(.* (..)\)$/\1/p' > "$cache"
+		zztool dump "$url" |
+		sed -n '/A\[/,/Ver também\[/p' |
+		sed '/[•*]/!d;s//\
+/g;' | zztrim | zzlimpalixo |
+		LC_ALL=C sort > "$cache"
 	fi
 
 	if test -z "$padrao"
@@ -3604,6 +3171,7 @@ zzcidade ()
 # Desde: 2000-12-15
 # Versão: 1
 # Licença: GPL
+# Nota: requer cpp
 # ----------------------------------------------------------------------------
 zzcinclude ()
 {
@@ -3618,7 +3186,7 @@ zzcinclude ()
 	test "${arquivo#/}" = "$arquivo" && arquivo="/usr/include/$arquivo.h"
 
 	# Verifica se o arquivo existe
-	zztool arquivo_legivel "$arquivo" || return
+	zztool -e arquivo_legivel "$arquivo" || return
 
 	# Saída ordenada, com um Sed mágico para limpar a saída do cpp
 	cpp -E "$arquivo" |
@@ -3636,272 +3204,65 @@ zzcinclude ()
 # zzcinemais
 # http://www.cinemais.com.br
 # Busca horários das sessões dos filmes no site do Cinemais.
-# Cidades disponíveis:
-#   Uberaba                -   9
-#   Patos de Minas         -  11
-#   Guaratingueta          -  21
-#   Anapolis               -  32
-#   Resende                -  33
-#   Monte Carlos           -  34
-#   Juiz de Fora           -  35
+# Sem argumento lista as cidades com os códigos dos cinemas.
 #
-# Uso: zzcinemais [cidade]
-# Ex.: zzcinemais milenium
+# Uso: zzcinemais [código cidade]
+# Ex.: zzcinemais 9
 #
 # Autor: Marcell S. Martini <marcellmartini (a) gmail com>
 # Desde: 2008-08-25
-# Versão: 7
+# Versão: 11
 # Licença: GPLv2
-# Requisitos: zzecho zzsemacento zzminusculas zztrim zzutf8
+# Requisitos: zzecho zzjuntalinhas zztrim zzutf8 zzxml
+# Tags: cinema
 # ----------------------------------------------------------------------------
 zzcinemais ()
 {
 	zzzz -h cinemais "$1" && return
 
-	test -n "$1" || { zztool -e uso cinemais; return 1; }
+	local cidades
+	local codigo="$1"
+	local url='http://www.cinemais.com.br/programacao'
 
-	local cidade cidades codigo
-
-	cidade=$(echo "$*" | zzsemacento | zzminusculas | zztrim | sed 's/ /_/g')
-
-	cidades="9:uberaba:Uberaba  - MG
-	11:patos_de_minas:Patos de Minas - MG
-	21:guaratingueta:Guaratinguetá - SP
-	32:anapolis:Anápolis - GO
-	33:resende:Resende - RJ
-	34:monte_carlos:Montes Claros - MG
-	35:juiz_de_fora:Juiz de Fora - MG"
-
-	codigo=$(echo "$cidades" | grep "${cidade}:" 2>/dev/null | cut -f 1 -d ":")
-
-	# Necessário fazer uso do argumento -useragent="Mozilla/5.0", pois o site se recusa a funcionar com lynx, links, curl e w3m.
-	# Uma ridícula implementação do site :( ( Desculpe pelo protesto! )
-	if test -n "$codigo"
-	then
-		zzecho -N -l ciano $(echo "$cidades" | grep "${cidade}:" | cut -f 3 -d ":")
-		$ZZWWWHTML -useragent="Mozilla/5.0" "http://www.cinemais.com.br/programacao/cinema.php?cc=$codigo" 2>/dev/null |
+	cidades=$(
+		zztool source "$url" |
 		zzutf8 |
-		grep -E '(<td><a href|<td><small|[0-9] a [0-9])' |
+		sed -n '/cliclabeProg/,/cliclabeProg/p' |
+		zzxml --notag script --tag li |
 		zztrim |
-		sed 's/<[^>]*>//g;s/Programa.* - //' |
-		awk '{print}; NR%2==1 {print ""}' | sed '$d'
-	fi
-}
+		zzjuntalinhas -i '<li' -f '</li>' -d '' |
+		sed 's/.*id="//; s/">/ - /; s/<.*//' |
+		sort -n
+	)
 
-# ----------------------------------------------------------------------------
-# zzcinemark
-# http://cinemark.com.br/programacao
-# Exibe a programação dos cinemas Cinemark de sua cidade.
-# Sem argumento lista todas as cidades e todas as salas mostrando os códigos.
-# Com o cógigo da cidade lista as salas dessa cidade.
-# Com o código das salas mostra os filmes do dia.
-# Um segundo argumento caso pode ser a data, para listar os filmes desse dia.
-# As datas devem ser futuras e conforme a padrão zzdata
-#
-# Uso: zzcinemark [codigo_cidade | codigo_cinema] [data]
-# Ex.: zzcinemark 1            # Lista os cinemas de São Paulo
-#      zzcinemark 662 sab      # Filmes de Raposo Shopping no sábado
-#
-# Autor: Thiago Moura Witt <thiago.witt (a) gmail.com> <@thiagowitt>
-# Desde: 2011-07-05
-# Versão: 2
-# Licença: GPL
-# Requisitos: zzdatafmt zzxml zzunescape zztrim zzcolunar
-# ----------------------------------------------------------------------------
-zzcinemark ()
-{
-	zzzz -h cinemark "$1" && return
-
-	local cache=$(zztool cache cinemark)
-	local url="http://cinemark.com.br/programacao"
-	local cidade codigo dia
-
-	if test "$1" = '--atualiza'
+	if test -z "$codigo"
 	then
-		zztool atualiza cinemark
-		shift
+		echo "$cidades"
+		return
 	fi
 
-	if ! test -s "$cache"
+	if ! zztool testa_numero "$codigo"
 	then
-		# Lista de Cidades
-		$ZZWWWHTML "$url" |
-		grep '_Cidades\[' |
-		sed "s/.*'\([0-9]\{1,2\}\)'/ \1/;s/] = '/:/;s/'.*//" > $cache
-
-		# Lista de Salas por cidade
-		$ZZWWWHTML "$url" |
-		grep '_Cinemas\[' |
-		sed "s/.*'\([0-9]\{1,2\}\)'/\1/;s/');//;s/].*( '/:/;s/'[^']*'/:/g" >> $cache
+		zztool -e uso cinemais
+		return 1
 	fi
 
-	if test $# = 0
+	if ! echo "$cidades" | grep "^${codigo} - " >/dev/null
 	then
-		# mostra opções
-		echo "                                   Cidades e Salas disponíveis                                   "
-		echo "================================================================================================="
-		cat $cache |
-		sed 's/^ /0/' |
-		sort -n |
-		awk -F ":" '
-			NF==2 {printf "\n%s (Cod: %02d)\n", $2, $1}
-			NF>2 {
-				for (i=2;i<=NF;i+=2) {
-					printf " %4s) %s\n", $i, $(i+1)
-				}
-			}
-		' | zzcolunar 2
-		return 0
-	elif zztool testa_numero $1 && test $1 -lt 100
-	then
-		grep "^ *$1:" $cache |
-		sort -n |
-		awk -F ":" '
-			NF==2 {printf "%s (Cod: %02d)\n", $2, $1}
-			NF>2 {
-				for (i=2;i<=NF;i+=2) {
-					printf " %4s) %s\n", $i, $(i+1)
-				}
-			}
-		'
-		return 0
-	elif zztool testa_numero $1 && test $1 -ge 100
-	then
-		if test -n "$2"
-		then
-			case "$2" in
-					# apelidos
-					hoje | amanh[ãa])
-						dia=$(zzdatafmt -f "DD-MM-AAAA" $2)
-					;;
-					# semana (curto)
-					dom | seg | ter | qua | qui | sex | sab)
-						dia=$(zzdatafmt -f "DD-MM-AAAA" $2)
-					;;
-					# semana (longo)
-					domingo | segunda | ter[cç]a | quarta | quinta | sexta | s[aá]bado)
-						dia=$(zzdatafmt -f "DD-MM-AAAA" $2)
-					;;
-			esac
-
-			if test -z "$dia"
-			then
-				if zztool testa_data $2
-				then
-					dia=$(zzdatafmt -f "DD-MM-AAAA" $2)
-				else
-					dia=$(zzdatafmt -f "DD-MM-AAAA" hoje)
-				fi
-			fi
-		else
-			dia=$(zzdatafmt -f "DD-MM-AAAA" hoje)
-		fi
-
-		zztool eco $(grep ":$1:" $cache | sed "s/.*:$1://;s/:.*//")
-
-		$ZZWWWHTML "${url}/cinema/$1" |
-		sed -n '/class="date-tab-content"/,/_Cidades/p' |
-		sed -n '/class="date-tab-content"/p;/<h4>/p;/[0-9]h[0-9]/p;/images\/\(exibicao\|censura\)\//p' |
-		awk '{
-			if ($0 ~ /images/) {reserva=$0 }
-			else if ($0 ~ /date-tab-content/) {print; print ""}
-			else if ($0 ~ /[0-9]h[0-9]/){ print reserva; print; print "" }
-			else print
-			}' |
-		sed '/date-/{s/.*date-\(....\)-\(..\)-\(..\).*/Dia: \3-\2-\1/}' |
-		sed '/class="exibicao"/d;s/<[^>]*alt="\([A-Za-z0-9 ]*\)">/\1  /g' |
-		zztrim |
-		sed -n "/${dia}/,/Dia: /p" | sed '$d' |
-		zzxml --untag | zzunescape --html
-	fi
-}
-
-# ----------------------------------------------------------------------------
-# zzcinepolis
-# http://www.cinepolis.com.br/
-# Exibe a programação dos cinemas Cinepólis de sua cidade.
-# Se não for passado nenhum parâmetro, são listadas as cidades e cinemas.
-# Uso: zzcinepolis [cidade | codigo_cinema]
-# Ex.: zzcinepolis barueri
-#      zzcinepolis 36
-#
-# Autor: Itamar <itamarnet (a) yahoo com br>
-# Desde: 2015-02-22
-# Versão: 1
-# Licença: GPL
-# Requisitos: zzminusculas zzsemacento zzjuntalinhas zzcolunar zztrim zzecho zzutf8
-# ----------------------------------------------------------------------------
-zzcinepolis ()
-{
-	zzzz -h cinepolis "$1" && return
-
-	local cache=$(zztool cache cinepolis)
-	local url='http://www.cinepolis.com.br/programacao'
-	local cidade codigo codigos
-
-	if test "$1" = '--atualiza'
-	then
-		zztool atualiza cinepolis
-		shift
+		zztool erro "Não encontrei o cinema ${codigo}"
+		return 1
 	fi
 
-	# Necessário fazer uso do argumento -useragent="Mozilla/5.0", pois o site se recusa a funcionar com lynx, links, curl e w3m.
-	# Uma ridícula implementação do site :( ( Desculpe pelo protesto, de novo! )
-	if ! test -s "$cache"
-	then
-		$ZZWWWHTML -useragent="Mozilla/5.0" "$url" 2>/dev/null |
-		grep -E '(class="amarelo"|\?cc=)' |
-		zzutf8 |
-		sed '/img /d;/>Estreias</d;s/.*"amarelo">//;s/.*cc=/ /;s/".*">/) /' |
-		sed 's/<[^>]*>//' |
-		sed 's/^\([A-Z]\)\(.*\)$/\
-\1\2:/' > $cache
-	fi
-
-	if test $# = 0; then
-		# mostra opções
-		zztool eco "Cidades e cinemas disponíveis:"
-		zzcolunar 2 $cache
-		return 0
-	fi
-
-	cidade=$(echo "$*" | zzsemacento | zzminusculas | zztrim | sed 's/ 0/ /g;s/  */_/g')
-
-	codigo=$(
-		cat "$cache" |
-		while read linha
-		do
-			echo "$linha" | grep ':$' >/dev/null &&
-			echo "$linha" | zzminusculas | zzsemacento | tr ' ' '_' ||
-			echo "$linha" | sed 's/).*//'
-		done
-		)
-
-	# passou código
-	if zztool testa_numero ${cidade}; then
-		# testa se código é válido
-		echo "$codigo" | grep "$cidade" >/dev/null && codigos="$cidade"
-	else
-		# passou nome da cidade
-		codigos=$(
-			echo "$codigo" |
-			sed -n "/${cidade}.*:$/,/^$/{/:/d;p;}" |
-			zzjuntalinhas
-			)
-	fi
-
-	# se não recebeu cidade ou código válido, sai
-	test -z "$codigos" && { zztool -e uso cinepolis; return 1; }
-
-	for codigo in $codigos
-	do
-		zzecho -N -l ciano $(grep " ${codigo})" $cache | sed 's/.*) //')
-		$ZZWWWDUMP -useragent="Mozilla/5.0" "${url}/cinema.php?cc=${codigo}" 2>/dev/null |
-		sed -n '/  [0-9]\{1,2\}  /p;/[0-9]h[0-9]/p' |
-		sed 's/\(.*h[0-9][0-9]\).*/\1/;s/\^.//g;/OBS\.: /d' |
-		sed 's/^ *\([0-9]\)* *   /\1 /' |
-		awk '$1 ~ /[0-9]{1,}/ {printf "Sala: ";$1=$1 " -"}; {print}; NR%2==0 {print ""}'
-	done  | sed '$d'
+	# Especificando User Agent na opçãp -u "Mozilla/5.0"
+	zzecho -N -l ciano $(echo "$cidades" | grep "^${codigo} - " | sed 's/^[0-9][0-9]* - //')
+	zztool source -u "Mozilla/5.0" "${url}/cinema.php?cc=${codigo}" 2>/dev/null |
+	zztool texto_em_iso |
+	grep -E '(<td><a href|<td><small|[0-9] a [0-9])' |
+	zzutf8 |
+	zztrim |
+	sed 's/<[^>]*>//g;s/Programa.* - //' |
+	awk '{print}; NR%2==1 {print ""}' |
+	sed '$d'
 }
 
 # ----------------------------------------------------------------------------
@@ -3909,23 +3270,23 @@ zzcinepolis ()
 # http://www.ucicinemas.com.br
 # Exibe a programação dos cinemas UCI de sua cidade.
 # Se não for passado nenhum parâmetro, são listadas as cidades e cinemas.
-# Uso: zzcineuci [cidade | codigo_cinema]
-# Ex.: zzcineuci recife
-#      zzcineuci 14
+# Uso: zzcineuci [codigo_cinema]
+# Ex.: zzcineuci 14
 #
 # Autor: Rodrigo Pereira da Cunha <rodrigopc (a) gmail.com>
 # Desde: 2009-05-04
-# Versão: 8
+# Versão: 10
 # Licença: GPL
-# Requisitos: zzminusculas zzsemacento zzxml zzcapitalize zzjuntalinhas zztrim
+# Requisitos: zzunescape zztrim zzcolunar
+# Tags: cinema
 # ----------------------------------------------------------------------------
 zzcineuci ()
 {
 	zzzz -h cineuci "$1" && return
 
 	local cache=$(zztool cache cineuci)
-	local cidade codigo codigos
-	local url="http://www.ucicinemas.com.br/controles/listaFilmeCinemaHome.aspx?cinemaID="
+	local cinema codigo
+	local url="http://www.ucicinemas.com.br"
 
 	if test "$1" = '--atualiza'
 	then
@@ -3933,79 +3294,51 @@ zzcineuci ()
 		shift
 	fi
 
+	# Cidades e código cinemas e cinemas
 	if ! test -s "$cache"
 	then
-		$ZZWWWHTML "http://www.ucicinemas.com.br/localizacao+e+precos" |
-		zzxml --tidy |
-		sed -n "/\(class=.heading-bg.\|class=.btn-holder.\)/{n;p;}" |
-		sed '
-			s/.*cinema-/ /
-			s/uci/UCI/
-			s/-/) /
-			s/.>//
-			s/+/ /g
-			s/ \([1-9]\))/ 0\1)/
-			s/^\([A-Z]\)\(.*\)$/\
-\1\2:/' |
-		zzcapitalize > "$cache"
+		zztool source "${url}/cinemas" |
+		sed -n '
+			1,/<content>/d
+			/class="cinemas / { s/.*_//;s/".*//;n; p; }
+			/Avatar/ { s|.*Avatar/||; s|/Avatar\..*||; p; }
+			/strong/,/strong/ { /strong/d; p; }
+			/<\/content>/q
+		' |
+		zzunescape --html |
+		zztrim |
+		awk '{ if ($0 ~/^[0-9]+$/) {cod=sprintf("%02d",$0);getline; print " " cod " - " $0} else print "\n" $0}' |
+		tr -d '\r' |
+		zztrim -V > "$cache"
 	fi
 
-	if test $# = 0; then
-		# mostra opções
-		printf "Cidades e cinemas disponíveis\n=============================\n"
+	if test $# -eq 0
+	then
 		cat "$cache"
-		return 0
-	fi
 
-	cidade=$(echo "$*" | zzsemacento | zzminusculas | zztrim | sed 's/ 0/ /g;s/  */_/g')
-
-	codigo=$(
-		cat "$cache" |
-		while read linha
-		do
-			echo "$linha" | grep ':$' >/dev/null &&
-			echo "$linha" | zzminusculas | zzsemacento | tr ' ' '_' ||
-			echo "$linha" | sed 's/).*//'
-		done
-		)
-
-	# passou código
-	if zztool testa_numero ${cidade}; then
-		# testa se código é válido
-		cidade=$(printf "%02d" $cidade)
-		echo "$codigo" | grep "$cidade" >/dev/null && codigos="$cidade"
+	elif zztool testa_numero "$1"
+	then
+		codigo=$(sed 's/^[ 0]*//' "$cache" | grep -o --color=never "^$1 " | tr -d ' ')
+		cinema=$(sed 's/^[ 0]*//' "$cache" | grep --color=never "^$1 " | sed 's/.* - //' | zztrim)
+		if test -n "$codigo"
+		then
+			zztool eco "$cinema"
+			zztool source "${url}/api/Filmes/ListarFilmes/cinemas/${codigo}" |
+			tr '[{}],' '\n\n\n\n\n' |
+			sed -n '/"NomeDestaque":/p; /"Duracao":/,/"Censura":/p' |
+			sed 's/.*":"//;s/"//' |
+			sed "s/'//" |
+			awk 'BEGIN { printf "Filme\nDuração(min)\nGênero\nCensura\n" }; 1' |
+			zzcolunar -z 4 |
+			zztrim
+		else
+			zztool erro "Não encontrei o cinema $1"
+			return 1
+		fi
 	else
-		# passou nome da cidade
-		codigos=$(
-			echo "$codigo" |
-			sed -n "/${cidade}:/,/^$/{/:/d;p;}" |
-			zzjuntalinhas
-			)
+		zztool -e uso cineuci
+		return 1
 	fi
-
-	# se não recebeu cidade ou código válido, sai
-	test -z "$codigos" && return 1
-
-	for codigo in $codigos
-	do
-		$ZZWWWDUMP "$url$codigo" | sed '
-
-			# Faxina
-			s/^  *//
-			/^$/ d
-			/^Horários para/ d
-
-			# Destaque ao redor do nome do cinema, quebra linha após
-			1 i\
-=================================================
-			1 a\
-=================================================\
-
-
-			# Quebra linha após o horário
-			/^Sala / G
-		'
-	done
 }
 
 # ----------------------------------------------------------------------------
@@ -4028,7 +3361,7 @@ zzcnpj ()
 {
 	zzzz -h cnpj "$1" && return
 
-	local i n somatoria digito1 digito2 cnpj base
+	local i n somatoria digito1 digito2 cnpj base auxiliar quieto
 
 	# Atenção:
 	# Essa função é irmã-quase-gêmea da zzcpf, que está bem
@@ -4040,15 +3373,16 @@ zzcnpj ()
 
 	cnpj=$(echo "$*" | tr -d -c 0123456789)
 
-	# Talvez só precisamos formatar e nada mais?
+	# CNPJ válido formatado
 	if test "$1" = '-f'
 	then
 		cnpj=$(echo "$cnpj" | sed 's/^0*//')
-		: ${cnpj:=0}
 
-		if test ${#cnpj} -gt 14
+		# Só continua se o CNPJ for válido
+		auxiliar=$(zzcnpj $cnpj 2>&1)
+		if test "$auxiliar" != 'CNPJ válido'
 		then
-			zztool erro 'CNPJ inválido (passou de 14 dígitos)'
+			zztool erro "$auxiliar"
 			return 1
 		fi
 
@@ -4062,23 +3396,56 @@ zzcnpj ()
 		return 0
 	fi
 
-	if test -n "$cnpj"
+	# CNPJ válido não formatado
+	if test "$1" = '-F'
 	then
-		# CNPJ do usuário
 
-		if test ${#cnpj} -ne 14
+		if test "${#cnpj}" -eq 0
 		then
-			zztool erro 'CNPJ inválido (deve ter 14 dígitos)'
+			zzcnpj | tr -d -c '0123456789\n'
+			return 0
+		fi
+
+		cnpj=$(echo "$cnpj" | sed 's/^0*//')
+
+		# Só continua se o CNPJ for válido
+		auxiliar=$(zzcnpj $cnpj 2>&1)
+		if test "$auxiliar" != 'CNPJ válido'
+		then
+			zztool erro "$auxiliar"
 			return 1
 		fi
 
-		if test $cnpj -eq 0
+		printf "%014d\n" "$cnpj"
+		return 0
+	fi
+
+	test "$1" = '-q' && quieto=1
+
+	if test -n "$cnpj"
+	then
+		# CNPJ do usuário
+		cnpj=$(printf %014d "$cnpj")
+
+		if test ${#cnpj} -ne 14
 		then
-			zztool erro 'CNPJ inválido (não pode conter apenas zeros)'
+			test -n "$quieto" || zztool erro 'CNPJ inválido (deve ter 14 dígitos)'
 			return 1
 		fi
 
 		base="${cnpj%??}"
+
+		for ((i=0;i<13;i++))
+			do
+				auxiliar=$(echo "$base" | sed "s/$i/X/g")
+				if test "$auxiliar" = "XXXXXXXXXXXX"
+				then
+					test -n "$quieto" || zztool erro "CNPJ inválido (não pode conter os 12 primeiros digitos iguais)"
+					return 1
+				fi
+			done
+		#Fim do laço de verificação de digitos repetidos
+
 	else
 		# CNPJ gerado aleatoriamente
 
@@ -4130,101 +3497,398 @@ zzcnpj ()
 	else
 		if test "${cnpj#????????????}" = "$digito1$digito2"
 		then
-			echo 'CNPJ válido'
+			test -n "$quieto" || echo 'CNPJ válido'
 		else
 			# Boa ação do dia: mostrar quais os verificadores corretos
-			echo "CNPJ inválido (deveria terminar em $digito1$digito2)"
+			test -n "$quieto" || zztool erro "CNPJ inválido (deveria terminar em $digito1$digito2)"
+			return 1
 		fi
 	fi
 }
 
 # ----------------------------------------------------------------------------
+# zzcodchar
+# Codifica caracteres como entidades HTML e XML (&lt; &#62; ...).
+# Entende entidades (&gt;), códigos decimais (&#62;) e hexadecimais (&#x3E;).
+#
+# Opções: --html/--xml  Codifica caracteres em códigos HTML/XML
+#         --hex         Codifica caracteres em códigos hexadecimais
+#         --dec         Codifica caracteres em códigos decimais
+#         -s            Com essa opção também codifica os espaços
+#         --listar      Mostra a listagem completa de codificação
+#                       Ou só a listagem da codificação escolhida
+#
+# Uso: zzcodchar [-s] [--listar cod] [--html|--xml|--dec|--hex] [arquivo(s)]
+# Ex.: zzcodchar --html arquivo.xml
+#      zzcodchar --hex  arquivo.html
+#      cat arquivo.html | zzcodchar --dec
+#      zzcodchar --listar html     #  Listagem dos caracteres e códigos html
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2015-12-07
+# Versão: 3
+# Licença: GPL
+# Requisitos: zztrim zzpad
+# ----------------------------------------------------------------------------
+zzcodchar ()
+{
+	zzzz -h codchar "$1" && return
+
+	local cods codspace codsed
+	local char html hex dec
+
+	codspace="s/ /\&	nbsp	#xA0	#160	;/g;"
+
+	cods="s/&/\&	amp	#x26	#38	;/g;
+s/\"/\&	quot	#x22	#34	;/g;
+s/'/\&	apos	#x27	#39	;/g;
+s/</\&	lt	#x3C	#60	;/g;
+s/>/\&	gt	#x3E	#62	;/g;
+s/¡/\&	iexcl	#xA1	#161	;/g;
+s/¢/\&	cent	#xA2	#162	;/g;
+s/£/\&	pound	#xA3	#163	;/g;
+s/¤/\&	curren	#xA4	#164	;/g;
+s/¥/\&	yen	#xA5	#165	;/g;
+s/¦/\&	brvbar	#xA6	#166	;/g;
+s/§/\&	sect	#xA7	#167	;/g;
+s/¨/\&	uml	#xA8	#168	;/g;
+s/©/\&	copy	#xA9	#169	;/g;
+s/ª/\&	ordf	#xAA	#170	;/g;
+s/«/\&	laquo	#xAB	#171	;/g;
+s/¬/\&	not	#xAC	#172	;/g;
+s/­/\&	shy	#xAD	#173	;/g;
+s/®/\&	reg	#xAE	#174	;/g;
+s/¯/\&	macr	#xAF	#175	;/g;
+s/°/\&	deg	#xB0	#176	;/g;
+s/±/\&	plusmn	#xB1	#177	;/g;
+s/²/\&	sup2	#xB2	#178	;/g;
+s/³/\&	sup3	#xB3	#179	;/g;
+s/´/\&	acute	#xB4	#180	;/g;
+s/µ/\&	micro	#xB5	#181	;/g;
+s/¶/\&	para	#xB6	#182	;/g;
+s/·/\&	middot	#xB7	#183	;/g;
+s/¸/\&	cedil	#xB8	#184	;/g;
+s/¹/\&	sup1	#xB9	#185	;/g;
+s/º/\&	ordm	#xBA	#186	;/g;
+s/»/\&	raquo	#xBB	#187	;/g;
+s/¼/\&	frac14	#xBC	#188	;/g;
+s/½/\&	frac12	#xBD	#189	;/g;
+s/¾/\&	frac34	#xBE	#190	;/g;
+s/¿/\&	iquest	#xBF	#191	;/g;
+s/À/\&	Agrave	#xC0	#192	;/g;
+s/Á/\&	Aacute	#xC1	#193	;/g;
+s/Â/\&	Acirc	#xC2	#194	;/g;
+s/Ã/\&	Atilde	#xC3	#195	;/g;
+s/Ä/\&	Auml	#xC4	#196	;/g;
+s/Å/\&	Aring	#xC5	#197	;/g;
+s/Æ/\&	AElig	#xC6	#198	;/g;
+s/Ç/\&	Ccedil	#xC7	#199	;/g;
+s/È/\&	Egrave	#xC8	#200	;/g;
+s/É/\&	Eacute	#xC9	#201	;/g;
+s/Ê/\&	Ecirc	#xCA	#202	;/g;
+s/Ë/\&	Euml	#xCB	#203	;/g;
+s/Ì/\&	Igrave	#xCC	#204	;/g;
+s/Í/\&	Iacute	#xCD	#205	;/g;
+s/Î/\&	Icirc	#xCE	#206	;/g;
+s/Ï/\&	Iuml	#xCF	#207	;/g;
+s/Ð/\&	ETH	#xD0	#208	;/g;
+s/Ñ/\&	Ntilde	#xD1	#209	;/g;
+s/Ò/\&	Ograve	#xD2	#210	;/g;
+s/Ó/\&	Oacute	#xD3	#211	;/g;
+s/Ô/\&	Ocirc	#xD4	#212	;/g;
+s/Õ/\&	Otilde	#xD5	#213	;/g;
+s/Ö/\&	Ouml	#xD6	#214	;/g;
+s/×/\&	times	#xD7	#215	;/g;
+s/Ø/\&	Oslash	#xD8	#216	;/g;
+s/Ù/\&	Ugrave	#xD9	#217	;/g;
+s/Ú/\&	Uacute	#xDA	#218	;/g;
+s/Û/\&	Ucirc	#xDB	#219	;/g;
+s/Ü/\&	Uuml	#xDC	#220	;/g;
+s/Ý/\&	Yacute	#xDD	#221	;/g;
+s/Þ/\&	THORN	#xDE	#222	;/g;
+s/ß/\&	szlig	#xDF	#223	;/g;
+s/à/\&	agrave	#xE0	#224	;/g;
+s/á/\&	aacute	#xE1	#225	;/g;
+s/â/\&	acirc	#xE2	#226	;/g;
+s/ã/\&	atilde	#xE3	#227	;/g;
+s/ä/\&	auml	#xE4	#228	;/g;
+s/å/\&	aring	#xE5	#229	;/g;
+s/æ/\&	aelig	#xE6	#230	;/g;
+s/ç/\&	ccedil	#xE7	#231	;/g;
+s/è/\&	egrave	#xE8	#232	;/g;
+s/é/\&	eacute	#xE9	#233	;/g;
+s/ê/\&	ecirc	#xEA	#234	;/g;
+s/ë/\&	euml	#xEB	#235	;/g;
+s/ì/\&	igrave	#xEC	#236	;/g;
+s/í/\&	iacute	#xED	#237	;/g;
+s/î/\&	icirc	#xEE	#238	;/g;
+s/ï/\&	iuml	#xEF	#239	;/g;
+s/ð/\&	eth	#xF0	#240	;/g;
+s/ñ/\&	ntilde	#xF1	#241	;/g;
+s/ò/\&	ograve	#xF2	#242	;/g;
+s/ó/\&	oacute	#xF3	#243	;/g;
+s/ô/\&	ocirc	#xF4	#244	;/g;
+s/õ/\&	otilde	#xF5	#245	;/g;
+s/ö/\&	ouml	#xF6	#246	;/g;
+s/÷/\&	divide	#xF7	#247	;/g;
+s/ø/\&	oslash	#xF8	#248	;/g;
+s/ù/\&	ugrave	#xF9	#249	;/g;
+s/ú/\&	uacute	#xFA	#250	;/g;
+s/û/\&	ucirc	#xFB	#251	;/g;
+s/ü/\&	uuml	#xFC	#252	;/g;
+s/ý/\&	yacute	#xFD	#253	;/g;
+s/þ/\&	thorn	#xFE	#254	;/g;
+s/ÿ/\&	yuml	#xFF	#255	;/g;
+s/Œ/\&	OElig	#x152	#338	;/g;
+s/œ/\&	oelig	#x153	#339	;/g;
+s/Š/\&	Scaron	#x160	#352	;/g;
+s/š/\&	scaron	#x161	#353	;/g;
+s/Ÿ/\&	Yuml	#x178	#376	;/g;
+s/ƒ/\&	fnof	#x192	#402	;/g;
+s/ˆ/\&	circ	#x2C6	#710	;/g;
+s/˜/\&	tilde	#x2DC	#732	;/g;
+s/Α/\&	Alpha	#x391	#913	;/g;
+s/Β/\&	Beta	#x392	#914	;/g;
+s/Γ/\&	Gamma	#x393	#915	;/g;
+s/Δ/\&	Delta	#x394	#916	;/g;
+s/Ε/\&	Epsilon	#x395	#917	;/g;
+s/Ζ/\&	Zeta	#x396	#918	;/g;
+s/Η/\&	Eta	#x397	#919	;/g;
+s/Θ/\&	Theta	#x398	#920	;/g;
+s/Ι/\&	Iota	#x399	#921	;/g;
+s/Κ/\&	Kappa	#x39A	#922	;/g;
+s/Λ/\&	Lambda	#x39B	#923	;/g;
+s/Μ/\&	Mu	#x39C	#924	;/g;
+s/Ν/\&	Nu	#x39D	#925	;/g;
+s/Ξ/\&	Xi	#x39E	#926	;/g;
+s/Ο/\&	Omicron	#x39F	#927	;/g;
+s/Π/\&	Pi	#x3A0	#928	;/g;
+s/Ρ/\&	Rho	#x3A1	#929	;/g;
+s/Σ/\&	Sigma	#x3A3	#931	;/g;
+s/Τ/\&	Tau	#x3A4	#932	;/g;
+s/Υ/\&	Upsilon	#x3A5	#933	;/g;
+s/Φ/\&	Phi	#x3A6	#934	;/g;
+s/Χ/\&	Chi	#x3A7	#935	;/g;
+s/Ψ/\&	Psi	#x3A8	#936	;/g;
+s/Ω/\&	Omega	#x3A9	#937	;/g;
+s/α/\&	alpha	#x3B1	#945	;/g;
+s/β/\&	beta	#x3B2	#946	;/g;
+s/γ/\&	gamma	#x3B3	#947	;/g;
+s/δ/\&	delta	#x3B4	#948	;/g;
+s/ε/\&	epsilon	#x3B5	#949	;/g;
+s/ζ/\&	zeta	#x3B6	#950	;/g;
+s/η/\&	eta	#x3B7	#951	;/g;
+s/θ/\&	theta	#x3B8	#952	;/g;
+s/ι/\&	iota	#x3B9	#953	;/g;
+s/κ/\&	kappa	#x3BA	#954	;/g;
+s/λ/\&	lambda	#x3BB	#955	;/g;
+s/μ/\&	mu	#x3BC	#956	;/g;
+s/ν/\&	nu	#x3BD	#957	;/g;
+s/ξ/\&	xi	#x3BE	#958	;/g;
+s/ο/\&	omicron	#x3BF	#959	;/g;
+s/π/\&	pi	#x3C0	#960	;/g;
+s/ρ/\&	rho	#x3C1	#961	;/g;
+s/ς/\&	sigmaf	#x3C2	#962	;/g;
+s/σ/\&	sigma	#x3C3	#963	;/g;
+s/τ/\&	tau	#x3C4	#964	;/g;
+s/υ/\&	upsilon	#x3C5	#965	;/g;
+s/φ/\&	phi	#x3C6	#966	;/g;
+s/χ/\&	chi	#x3C7	#967	;/g;
+s/ψ/\&	psi	#x3C8	#968	;/g;
+s/ω/\&	omega	#x3C9	#969	;/g;
+s/ϑ/\&	thetasym	#x3D1	#977	;/g;
+s/ϒ/\&	upsih	#x3D2	#978	;/g;
+s/ϖ/\&	piv	#x3D6	#982	;/g;
+s/ /\&	ensp	#x2002	#8194	;/g;
+s/ /\&	emsp	#x2003	#8195	;/g;
+s/ /\&	thinsp	#x2009	#8201	;/g;
+s/‌/\&	zwnj	#x200C	#8204	;/g;
+s/‍/\&	zwj	#x200D	#8205	;/g;
+s/‎/\&	lrm	#x200E	#8206	;/g;
+s/‏/\&	rlm	#x200F	#8207	;/g;
+s/–/\&	ndash	#x2013	#8211	;/g;
+s/—/\&	mdash	#x2014	#8212	;/g;
+s/‘/\&	lsquo	#x2018	#8216	;/g;
+s/’/\&	rsquo	#x2019	#8217	;/g;
+s/‚/\&	sbquo	#x201A	#8218	;/g;
+s/“/\&	ldquo	#x201C	#8220	;/g;
+s/”/\&	rdquo	#x201D	#8221	;/g;
+s/„/\&	bdquo	#x201E	#8222	;/g;
+s/†/\&	dagger	#x2020	#8224	;/g;
+s/‡/\&	Dagger	#x2021	#8225	;/g;
+s/•/\&	bull	#x2022	#8226	;/g;
+s/…/\&	hellip	#x2026	#8230	;/g;
+s/‰/\&	permil	#x2030	#8240	;/g;
+s/′/\&	prime	#x2032	#8242	;/g;
+s/″/\&	Prime	#x2033	#8243	;/g;
+s/‹/\&	lsaquo	#x2039	#8249	;/g;
+s/›/\&	rsaquo	#x203A	#8250	;/g;
+s/‾/\&	oline	#x203E	#8254	;/g;
+s/⁄/\&	frasl	#x2044	#8260	;/g;
+s/€/\&	euro	#x20AC	#8364	;/g;
+s/ℑ/\&	image	#x2111	#8465	;/g;
+s/℘/\&	weierp	#x2118	#8472	;/g;
+s/ℜ/\&	real	#x211C	#8476	;/g;
+s/™/\&	trade	#x2122	#8482	;/g;
+s/ℵ/\&	alefsym	#x2135	#8501	;/g;
+s/←/\&	larr	#x2190	#8592	;/g;
+s/↑/\&	uarr	#x2191	#8593	;/g;
+s/→/\&	rarr	#x2192	#8594	;/g;
+s/↓/\&	darr	#x2193	#8595	;/g;
+s/↔/\&	harr	#x2194	#8596	;/g;
+s/↵/\&	crarr	#x21B5	#8629	;/g;
+s/⇐/\&	lArr	#x21D0	#8656	;/g;
+s/⇑/\&	uArr	#x21D1	#8657	;/g;
+s/⇒/\&	rArr	#x21D2	#8658	;/g;
+s/⇓/\&	dArr	#x21D3	#8659	;/g;
+s/⇔/\&	hArr	#x21D4	#8660	;/g;
+s/∀/\&	forall	#x2200	#8704	;/g;
+s/∂/\&	part	#x2202	#8706	;/g;
+s/∃/\&	exist	#x2203	#8707	;/g;
+s/∅/\&	empty	#x2205	#8709	;/g;
+s/∇/\&	nabla	#x2207	#8711	;/g;
+s/∈/\&	isin	#x2208	#8712	;/g;
+s/∉/\&	notin	#x2209	#8713	;/g;
+s/∋/\&	ni	#x220B	#8715	;/g;
+s/∏/\&	prod	#x220F	#8719	;/g;
+s/∑/\&	sum	#x2211	#8721	;/g;
+s/−/\&	minus	#x2212	#8722	;/g;
+s/∗/\&	lowast	#x2217	#8727	;/g;
+s/√/\&	radic	#x221A	#8730	;/g;
+s/∝/\&	prop	#x221D	#8733	;/g;
+s/∞/\&	infin	#x221E	#8734	;/g;
+s/∠/\&	ang	#x2220	#8736	;/g;
+s/∧/\&	and	#x2227	#8743	;/g;
+s/∨/\&	or	#x2228	#8744	;/g;
+s/∩/\&	cap	#x2229	#8745	;/g;
+s/∪/\&	cup	#x222A	#8746	;/g;
+s/∫/\&	int	#x222B	#8747	;/g;
+s/∴/\&	there4	#x2234	#8756	;/g;
+s/∼/\&	sim	#x223C	#8764	;/g;
+s/≅/\&	cong	#x2245	#8773	;/g;
+s/≈/\&	asymp	#x2248	#8776	;/g;
+s/≠/\&	ne	#x2260	#8800	;/g;
+s/≡/\&	equiv	#x2261	#8801	;/g;
+s/≤/\&	le	#x2264	#8804	;/g;
+s/≥/\&	ge	#x2265	#8805	;/g;
+s/⊂/\&	sub	#x2282	#8834	;/g;
+s/⊃/\&	sup	#x2283	#8835	;/g;
+s/⊄/\&	nsub	#x2284	#8836	;/g;
+s/⊆/\&	sube	#x2286	#8838	;/g;
+s/⊇/\&	supe	#x2287	#8839	;/g;
+s/⊕/\&	oplus	#x2295	#8853	;/g;
+s/⊗/\&	otimes	#x2297	#8855	;/g;
+s/⊥/\&	perp	#x22A5	#8869	;/g;
+s/⋅/\&	sdot	#x22C5	#8901	;/g;
+s/⌈/\&	lceil	#x2308	#8968	;/g;
+s/⌉/\&	rceil	#x2309	#8969	;/g;
+s/⌊/\&	lfloor	#x230A	#8970	;/g;
+s/⌋/\&	rfloor	#x230B	#8971	;/g;
+s/〈/\&	lang	#x27E8	#10216	;/g;
+s/〉/\&	rang	#x27E9	#10217	;/g;
+s/◊/\&	loz	#x25CA	#9674	;/g;
+s/♠/\&	spades	#x2660	#9824	;/g;
+s/♣/\&	clubs	#x2663	#9827	;/g;
+s/♥/\&	hearts	#x2665	#9829	;/g;
+s/♦/\&	diams	#x2666	#9830	;/g;
+"
+
+	# Opções de linha de comando
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+			-s) cods="$cods$codspace";shift;;
+			--html|--xml)
+				codsed=$(echo "$cods" | awk 'BEGIN {FS="\t"};{print $1 $2 $5}');
+				shift
+			;;
+			--hex)
+				codsed=$(echo "$cods" | awk 'BEGIN {FS="\t"};{print $1 $3 $5}');
+				shift
+			;;
+			--dec)
+				codsed=$(echo "$cods" | awk 'BEGIN {FS="\t"};{print $1 $4 $5}');
+				shift
+			;;
+			--listar)
+				printf '%s' 'char'
+				case $2 in
+				html|xml|hex|dec) printf '\t%b\n' "$2";;
+				*) printf '%b' ' html        hex         dec\n';;
+				esac
+				echo "$cods" |
+				zztrim |
+				sed 's|s/||; s|	;/g;||; s|/\\&||; ${ s| |"&"|; }' |
+				case $2 in
+				html|xml) sed 's/	/	\&/;s/	#.*/;/;$s/" "/ /';;
+				hex)      sed 's/	.*#x/	\&#x/;s/	[#0-9]*$/;/;$s/" "/ /';;
+				dec)      sed 's/	.*	/	\&/;s/$/;/;$s/" "/ /';;
+				*)
+					sed 's/	/	\&/g;s/	/;	/2g;s/$/;/' |
+					while read char html hex dec
+					do
+						echo "$(zzpad 4 $char) $(zzpad 11 $html) $(zzpad 11 $hex) $dec"
+					done |
+					sed '$s/"  *"  */     /;s/;	&/;      \&/'
+				esac
+				return
+			;;
+			*) break ;;
+		esac
+	done
+
+	# Faz a conversão
+	# Arquivos via STDIN ou argumentos
+	zztool file_stdin "$@" | sed "$codsed"
+}
+
+# ----------------------------------------------------------------------------
 # zzcoin
-# Retorna a cotação de criptomoedas em Reais (bitcoin e litecoins).
-# Opções: btc ou bitecoin / ltc ou litecoin.
-# Com as opções -a ou --all, várias criptomoedas cotadas em dólar.
-# Uso: zzcoin [btc|bitcoin|ltc|litecoin|-a|--all]
+# Retorna a cotação de criptomoedas em Reais (Bitcoin, Litecoins ou BCash).
+# Opções: btc ou bitecoin (padrão) / ltc ou litecoin / bch ou bcash.
+#
+# Uso: zzcoin [btc|bitcoin|ltc|litecoin|bch|bcash|-a|--all]
 # Ex.: zzcoin
 #      zzcoin btc
 #      zzcoin litecoin
-#      zzcoin -a
+#      zzcoin bch
 #
 # Autor: Tárcio Zemel <tarciozemel (a) gmail com>
 # Desde: 2014-03-24
-# Versão: 4
+# Versão: 6
 # Licença: GPL
-# Requisitos: zzminusculas zzsemacento zznumero
+# Requisitos: zzminusculas zznumero zzsemacento
 # ----------------------------------------------------------------------------
 zzcoin ()
 {
 	zzzz -h coin "$1" && return
 
 	# Variáveis gerais
-	local moeda_informada=$(echo "${1:--a}" | zzminusculas | zzsemacento)
-	local url="https://www.mercadobitcoin.com.br/api"
+	local moeda_informada=$(echo "${1:-btc}" | zzminusculas | zzsemacento)
+	local url="https://www.mercadobitcoin.net/api"
 
 	# Se não informou moeda válida, termina
 	case "$moeda_informada" in
-		btc | bitcoin  )
+		btc | bitcoin )
 			# Monta URL a ser consultada
-			url="${url}/ticker"
-			$ZZWWWHTML "$url" |
-			sed 's/.*"last"://;s/,"buy.*//' |
+			url="${url}/BTC/ticker/"
+			zztool dump "$url" |
+			sed 's/.*"last": *"//;s/", *"buy.*//' |
 			zznumero -m
 		;;
-		ltc | litecoin  )
+		ltc | litecoin )
 			# Monta URL a ser consultada
-			url="${url}/ticker_litecoin"
-			$ZZWWWHTML "$url" |
-			sed 's/.*"last"://;s/,"buy.*//' |
+			url="${url}/LTC/ticker/"
+			zztool dump "$url" |
+			sed 's/.*"last": *"//;s/", *"buy.*//' |
 			zznumero -m
 		;;
-		-a | --all )
-			url="http://coinmarketcap.com/mineable.html"
-			$ZZWWWDUMP "$url" |
-			sed -n '/#/,/Last updated/{
-				/^ *\*/d;
-				/^ *$/d;
-				s/Total Market Cap/Valor Total de Mercado/;
-				s/Last updated/Última atualização/;
-				s/ %//;
-				s/\$ //g;
-				s/  Name /Nome /;
-				s/ Market Cap/Valor Mercado/;
-				s/     Price/Preço/;
-				s/Total Supply/Total Oferta/;
-				s/ (24h)/(24h)/g;
-				s/Change(24h)/%Var(24h)/;
-				s/ Market Cap Graph (7d)//;
-				s/ Price Graph (7d)//;
-				/______/d;
-				p;
-				}' |
-			awk '
-				function espacos(  tamanho, saida, i) {
-					for(i=1;i<=tamanho;i++)
-						saida = saida " "
-					return saida
-				}
-				NR==1 {print}
-				NR>=2 {
-					if($2 == $3) {
-						atual = $2 " " $3
-						novo = $2 " " espacos(length($3))
-						sub(atual, novo)
-						print
-					}
-					else if($2 == $4 && $3 == $5) {
-						gsub(/\)/,"_"); gsub(/\(/,"_")
-						atual = $2 " " $3 " " $4 " " $5
-						novo = $2 " " $3 " " espacos(length($4)+length($5)+1)
-						sub(atual, novo)
-						gsub(/_/," "); gsub(/_/," ")
-						print
-					}
-					else { print }
-				}'
-			return
+		bch | bcash )
+			# Monta URL a ser consultada
+			url="${url}/BCH/ticker/"
+			zztool dump "$url" |
+			sed 's/.*"last": *"//;s/", *"buy.*//' |
+			zznumero -m
 		;;
 		* ) return 1;;
 	esac
@@ -4253,17 +3917,24 @@ zzcoin ()
 # As opções -c, --center, --centro centralizam as colunas.
 # A opção -j justifica as colunas.
 #
+# As opções -H ou --header usa a primeira linha como cabeçalho,
+# repetindo-a no início de cada coluna.
+#
 # As opções -w, --width, --largura seguido de um número,
 # determinam a largura que as colunas terão.
 #
-# Uso: zzcolunar [-n|-z] [-l|-r|-c] [-w <largura>] <colunas> arquivo
+# A opção -s seguida de um TEXTO determina o separador de colunas,
+# se não for declarado assume por padrão um espaço simples.
+#
+# Uso: zzcolunar [-n|-z] [-H] [-l|-r|-c|-j] [-w <largura>] <colunas> arquivo
 # Ex.: zzcolunar 3 arquivo.txt
 #      zzcolunar -c -w 20 5 arquivo.txt
 #      cat arquivo.txt | zzcolunar -z 4
+#      zzcolunar --header 3 arquivo.txt
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2014-04-24
-# Versão: 3
+# Versão: 5
 # Licença: GPL
 # Requisitos: zzalinhar zztrim
 # ----------------------------------------------------------------------------
@@ -4276,22 +3947,27 @@ zzcolunar ()
 	local formato='n'
 	local alinhamento='-l'
 	local largura=0
+	local header=0
+	local sep=' '
 	local colunas
 
 	while test "${1#-}" != "$1"
 	do
 		case "$1" in
-		-[nN]) formato='n';shift ;;
-		-[zZ]) formato='z';shift ;;
+		-[nN])                         formato='n';      shift ;;
+		-[zZ])                         formato='z';      shift ;;
+		-H | --header)                 header=1;         shift ;;
 		-l | --left | -e | --esqueda)  alinhamento='-l'; shift ;;
 		-r | --right | -d | --direita) alinhamento='-r'; shift ;;
 		-c | --center | --centro)      alinhamento='-c'; shift ;;
 		-j)                            alinhamento='-j'; shift ;;
+		-s)                            sep="$2";  shift; shift ;;
 		-w | --width | --largura)
 			zztool testa_numero "$2" && largura="$2" || { zztool erro "Largura inválida: $2"; return 1; }
 			shift
 			shift
 		;;
+		--) shift; break;;
 		-*) zztool erro "Opção inválida: $1"; return 1 ;;
 		*) break;;
 		esac
@@ -4302,18 +3978,26 @@ zzcolunar ()
 		colunas="$1"
 		shift
 	else
+		zztool erro "Quantidade de colunas inválidas";
 		zztool -e uso colunar
 		return 1
 	fi
 
 	zztool file_stdin "$@" |
 	zzalinhar -w $largura ${alinhamento} |
-	awk -v cols=$colunas -v formato=$formato '
+	awk -v cols=$colunas -v formato=$formato -v cab=$header -v delim="$sep" '
 
-		{ linha[NR] = $0 }
+		NR==1 { if (cab) header = $0 }
+
+		{ linha[NR - cab] = $0 }
 
 		END {
-			lin = ( int(NR/cols)==(NR/cols) ? NR/cols : int(NR/cols)+1 )
+			lin = ( int((NR-cab)/cols)==((NR-cab)/cols) ? (NR-cab)/cols : int((NR-cab)/cols)+1 )
+
+			if (cab) {
+				for ( j = 1; j <= cols; j++ ) { printf header (j<cols ? delim : "") }
+				print ""
+			}
 
 			# Formato N ( na verdade é И )
 			if (formato == "n") {
@@ -4322,7 +4006,7 @@ zzcolunar ()
 
 					for ( j = 0; j < cols; j++ ) {
 							if ( i + (j * lin ) <= NR )
-								linha_saida = linha_saida (j==0 ? "" : " ") linha[ i + ( j * lin ) ]
+								linha_saida = linha_saida (j==0 ? "" : delim) linha[ i + ( j * lin ) ]
 					}
 
 					print linha_saida
@@ -4336,7 +4020,7 @@ zzcolunar ()
 				{
 					for ( j = 1; j <= cols; j++ ) {
 						if ( i <= NR )
-							linha_saida = linha_saida (j==1 ? "" : " ") linha[i]
+							linha_saida = linha_saida (j==1 ? "" : delim) linha[i]
 
 						if (j == cols || i == NR) {
 							print linha_saida
@@ -4348,7 +4032,163 @@ zzcolunar ()
 				}
 			}
 		}
-	' | zztrim -V
+	' | zztrim -V |
+	if test "$sep" != ' '
+	then
+		sed "s/${sep}$//"
+	else
+		cat -
+	fi |
+	zztrim -r
+}
+
+# ----------------------------------------------------------------------------
+# zzconjugar
+# Conjuga verbo em todos os modos.
+# E pode-se filtrar pelo modo no segundo argumento:
+#  ind => Indicativo
+#  sub => Subjuntivo
+#  imp => Imperativo
+#  inf => Infinitivo
+#
+# Ou apenas a definição do verbo se o segundo argumento for: def
+#
+# Uso: zzconjugar verbo [ ind | sub | imp | inf | def ]
+# Ex.: zzconjugar correr
+#      zzconjugar comer sub
+#
+# Autor: Leslie Harlley Watter <leslie (a) watter org>
+# Desde: 2003-08-05
+# Versão: 5
+# Licença: GPL
+# Requisitos: zzalinhar zzcolunar zzjuntalinhas zzlblank zzminusculas zzsemacento zzsqueeze zztrim zzutf8 zzxml
+# Nota: Colaboração de José Inácio Coelho <jinacio (a) yahoo com>
+# ----------------------------------------------------------------------------
+zzconjugar ()
+{
+	zzzz -h conjugar "$1" && return
+
+	# Verificação dos parâmetros
+	test -n "$1" || { zztool -e uso conjugar; return 1; }
+
+	local url='http://www.conjugacao.com.br'
+	local contador=1
+	local modos='def ind sub imp inf'
+	local palavra padrao resultado conteudo modo modos
+
+	if test -n "$1"
+	then
+		palavra=$(echo "$1" | zzminusculas)
+		padrao=$(echo "$palavra" | zzsemacento)
+		shift
+	else
+		zztool -e uso conjugar
+		return 1
+	fi
+
+	test -n "$1" && modos="$*"
+
+	# Verificando se a palavra confere na pesquisa
+	until test "$resultado" = "$palavra"
+	do
+		conteudo=$(zztool source "$url/verbo-$padrao" | zzutf8 | zzxml --tidy --notag script | sed -n '/<h1/,/ relacionados com /p')
+		resultado=$(echo "$conteudo" | sed -n '2 { s/.* //; p; }' | zzminusculas)
+		test -n "$resultado" || { zztool erro "Palavra não encontrada"; return 1; }
+
+		# Incrementando o contador no padrão
+		padrao=$(echo "$padrao" | sed 's/-[0-9]*$//')
+		contador=$((contador + 1))
+		test $contador -gt 9 && return 1
+		padrao=${padrao}-${contador}
+	done
+
+	conteudo=$(
+		echo "$conteudo" |
+		zzjuntalinhas -i '<h2'                    -f '</h2>'      -d ' ' |
+		zzjuntalinhas -i '<h3'                    -f '</h3>'      -d ' ' |
+		zzjuntalinhas -i '<h4'                    -f '</h4>'      -d ' ' |
+		zzjuntalinhas -i '<strong'                -f '</strong>'  -d ' ' |
+		zzjuntalinhas -i '^<span>'                 -f '^</span>$' -d ' ' |
+		zzjuntalinhas -i '> Gerúndio <'           -f '^</span>'   -d ' ' |
+		zzjuntalinhas -i '> Particípio passado <' -f '^</span>'   -d ' ' |
+		zzjuntalinhas -i '> Infinitivo <'         -f ": $palavra" -d ' ' |
+		zzjuntalinhas -i '<u'                     -f '</u>'       -d ' ' |
+		zzjuntalinhas -i 'Separação silábica:'    -f '</u>'       -d ''
+	)
+
+	for modo in $modos
+	do
+		echo
+		case "$modo" in
+		def)
+			zztool eco $(echo "$conteudo" | sed -n '2 { s/<[^>]*>//g; s/^ *//; s/ *$//; p; }')
+			echo "$conteudo" |
+			sed '/intro-v/,/div>/d;/id="conjugacao"/q' |
+			zzxml --untag |
+			sed '1d; s/- /-/; s/ *:/:/;' |
+			zzsqueeze |
+			zztrim
+		;;
+		ind)
+			zztool eco Indicativo
+			echo "$conteudo" |
+			sed -n '/"modoconjuga"> Indicativo </,/> Subjuntivo </ { /^<h3/d; /^<p/d; /p>$/d; /^<div/d; /div>$/d; p; }' |
+			awk '/tempo-conjugacao-titulo/ { printf "\n\n"; print; next }
+				/> tu <|> eles? <|> [nv]ós </ { print "" }
+				/<br / { print ""; next }
+				{ printf $0 }
+			' |
+			zzxml --untag |
+			zztrim -H |
+			zzsqueeze |
+			zzcolunar -w 30 3 |
+			zztrim -H
+		;;
+		sub)
+			zztool eco Subjuntivo
+			echo "$conteudo" |
+			sed -n '/"modoconjuga"> Subjuntivo </,/> Imperativo </ {/^<h3/d; /^<p/d; /p>$/d; /^<div/d; /div>$/d; p; }' |
+			awk '/tempo-conjugacao-titulo/ { printf "\n\n"; printf $0; next }
+				/> que |> se |> quando / { print "" }
+				/<br / { print ""; next }
+				{ printf $0 }
+			' |
+			zzxml --untag |
+			zztrim -H |
+			zzsqueeze |
+			zzcolunar -w 30 3 |
+			zztrim -H
+		;;
+		imp)
+			zztool eco Imperativo
+			echo "$conteudo" |
+			sed -n '/"modoconjuga"> Imperativo </,/> Infinitivo </ {/^<h3/d; /^<p/d; /p>$/d; /^<div/d; /div>$/d; p; }' |
+			awk '/tempo-conjugacao-titulo/ { printf "\n\n"; print; next }
+				/--|> tu <|> eles? <|> vocês? <|> [nv]ós </ { print; next }
+				/<br / { print ""; next }
+				{ printf $0 }
+			' |
+			zzxml --untag |
+			zzsqueeze |
+			zzcolunar -r -w 30 2 |
+			zzlblank
+		;;
+		inf)
+			zztool eco Infinitivo
+			echo "$conteudo" |
+			sed -n '/"modoconjuga"> Infinitivo </,/\/p>$/ {/^<h[23]/d; /^<p/d; /p>$/d; /^<div/d; /div>$/d; p; }' |
+			awk '/> [et]u <|> eles? <|> [nv]ós <|tempo-conjugacao-titulo/ { print; next }
+				/<br / { print ""; next }
+				$0 !~ /^  *$/ { printf $0 }
+			' |
+			zzxml --untag |
+			zzsqueeze |
+			zzalinhar -r -w 30 |
+			zzlblank |
+			zztrim -r
+		;;
+		esac
+	done
 }
 
 # ----------------------------------------------------------------------------
@@ -4378,9 +4218,10 @@ zzcontapalavra ()
 	while test "${1#-}" != "$1"
 	do
 		case "$1" in
-			-p) inteira=  ;;
-			-i) ignora=1  ;;
-			* ) break     ;;
+			-p) inteira=     ;;
+			-i) ignora=1     ;;
+			--) shift; break ;;
+			* ) break        ;;
 		esac
 		shift
 	done
@@ -4489,39 +4330,89 @@ zzcontapalavras ()
 
 # ----------------------------------------------------------------------------
 # zzconverte
-# Faz várias conversões como: caracteres, temperatura e distância.
-#          cf = (C)elsius             para (F)ahrenheit
-#          fc = (F)ahrenheit          para (C)elsius
-#          ck = (C)elsius             para (K)elvin
-#          kc = (K)elvin              para (C)elsius
-#          fk = (F)ahrenheit          para (K)elvin
-#          kf = (K)elvin              para (F)ahrenheit
-#          km = (K)Quilômetros        para (M)ilhas
-#          mk = (M)ilhas              para (K)Quilômetros
-#          db = (D)ecimal             para (B)inário
-#          bd = (B)inário             para (D)ecimal
-#          cd = (C)aractere           para (D)ecimal
-#          dc = (D)ecimal             para (C)aractere
-#          hc = (H)exadecimal         para (C)aractere
-#          ch = (C)aractere           para (H)exadecimal
-#          dh = (D)ecimal             para (H)exadecimal
-#          hd = (H)exadecimal         para (D)ecimal
-# Uso: zzconverte <cf|fc|ck|kc|fk|kf|mk|km|db|bd|cd|dc|hc|ch|dh|hd> número
+# Conversões de caracteres, temperatura, distância, ângulo, grandeza e escala.
+#  Opções:
+#   -p seguido de um número sem espaço:
+#      define a precisão dos resultados (casas decimais), o padrão é 2
+#   -e: Resposta expandida, mais explicativa.
+#      Obs: sem essa opção a resposta é curta, apenas o número convertivo.
+#
+# Temperatura:
+#  cf = (C)elsius      => (F)ahrenheit  | fc = (F)ahrenheit  => (C)elsius
+#  ck = (C)elsius      => (K)elvin      | kc = (K)elvin      => (C)elsius
+#  fk = (F)ahrenheit   => (K)elvin      | kf = (K)elvin      => (F)ahrenheit
+#
+# Distância:
+#  km = (K)Quilômetros => (M)ilhas      | mk = (M)ilhas      => (K)Quilômetros
+#  mj = (M)etros       => (J)ardas      | jm = (J)ardas      => (M)etros
+#  mp = (M)etros       => (P)és         | pm = (P)és         => (M)etros
+#  jp = (J)ardas       => (P)és         | pj = (P)és         => (J)ardas
+#
+# Ângulo:
+#  gr = (G)raus        => (R)adianos    | rg = (R)adianos    => (G)raus
+#  ga = (G)raus        => Gr(A)dos      | ag = Gr(A)dos      => (G)raus
+#  ra = (R)adianos     => Gr(A)dos      | ar = Gr(A)dos      => (R)adianos
+#
+# Número:
+#  db = (D)ecimal      => (B)inário     | bd = (B)inário     => (D)ecimal
+#  dc = (D)ecimal      => (C)aractere   | cd = (C)aractere   => (D)ecimal
+#  do = (D)ecimal      => (O)ctal       | od = (O)ctal       => (D)ecimal
+#  dh = (D)ecimal      => (H)exadecimal | hd = (H)exadecimal => (D)ecimal
+#  hc = (H)exadecimal  => (C)aractere   | ch = (C)aractere   => (H)exadecimal
+#  ho = (H)exadecimal  => (O)ctal       | oh = (O)ctal       => (H)exadecimal
+#  hb = (H)exadecimal  => (B)inário     | bh = (B)inário     => (H)exadecimal
+#  ob = (O)ctal        => (B)inário     | bo = (B)inário     => (O)ctal
+#
+# Escala:
+#  Y => yotta      G => giga       d => deci       p => pico
+#  Z => zetta      M => mega       c => centi      f => femto
+#  E => exa        K => quilo      m => mili       a => atto
+#  P => peta       H => hecto      u => micro      z => zepto
+#  T => tera       D => deca       n => nano       y => yocto
+#  un => unidade
+#
+# Uso: zzconverte [-p<número>] [-e] <código(s)> [<código>] número [número ...]
 # Ex.: zzconverte cf 5
 #      zzconverte dc 65
-#      zzconverte db 32
+#      zzconverte db 32 47 28
+#      zzconverte -p9 mp 3  # Converte metros em pés com 9 casas decimais
+#      zzconverte G u 32    # Converte 32 gigas em 32000000000000000 micros
+#      zzconverte f H 7     # Converte 7 femtos em 0.00000000000000007 hecto
+#      zzconverte T 4       # Converte 4 teras em 4000000000000 unidades
+#      zzconverte un M 3    # Converte 3 unidades em 0.000003 megas
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2003-10-02
-# Versão: 2
+# Versão: 6
 # Licença: GPL
+# Requisitos: zznumero zztestar
 # ----------------------------------------------------------------------------
 zzconverte ()
 {
 	zzzz -h converte "$1" && return
 
-	local s2='scale=2'
+	local opt
+	local precisao='2'
+
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+			-e) opt="e"; shift ;;
+			-p*)
+				precisao="${1#-p}"
+				zztool testa_numero $precisao || precisao='2'
+				shift
+			;;
+		esac
+	done
+
+	local s2="scale=$precisao"
+	local pi='pi=4*a(1)'
 	local operacao=$1
+	local unid_escala="yzafpnumcd_DHKMGTPEZY"
+	local nome_escala="yocto zepto atto femto pico nano micro mili centi deci un deca hecto quilo mega giga tera peta exa zetta yotta"
+	local potencias="-24 -21 -18 -15 -12 -9 -6 -3 -2 -1 0 1 2 3 6 9 12 15 18 21 24"
+	local resp suf1 suf2 bc_expr num_hex fator operacao2
 
 	# Verificação dos parâmetros
 	test -n "$2" || { zztool -e uso converte; return 1; }
@@ -4529,64 +4420,122 @@ zzconverte ()
 	shift
 	while test -n "$1"
 	do
+		# Verificando consistência para números
 		case "$operacao" in
-			cf)
-				echo "$1 C = $(echo "$s2;($1*9/5)+32"     | bc) F"
-			;;
-			fc)
-				echo "$1 F = $(echo "$s2;($1-32)*5/9"     | bc) C"
-			;;
-			ck)
-				echo "$1 C = $(echo "$s2;$1+273.15"       | bc) K"
-			;;
-			kc)
-				echo "$1 K = $(echo "$s2;$1-273.15"       | bc) C"
-			;;
-			kf)
-				echo "$1 K = $(echo "$s2;($1*1.8)-459.67" | bc) F"
-			;;
-			fk)
-				echo "$1 F = $(echo "$s2;($1+459.67)/1.8" | bc) K"
-			;;
-			km)
-				echo "$1 km = $(echo "$s2;$1*0.6214"      | bc) milhas"
-				# ^ resultado com 4 casas porque bc usa o mesmo do 0.6214
-			;;
-			mk)
-				echo "$1 milhas = $(echo "$s2;$1*1.609"   | bc) km"
-				# ^ resultado com 3 casas porque bc usa o mesmo do 1.609
-			;;
-			db)
-				echo "obase=2;$1" | bc -l
-			;;
-			bd)
-				#echo "$((2#$1))"
-				echo "ibase=2;$1" | bc -l
-			;;
-			cd)
-				printf "%d\n" "'$1"
-			;;
-			dc)
-				if zztool testa_numero "$1" && test "$1" -gt 0
-				then
-					# echo -e $(printf "\\\x%x" $1)
-					awk 'BEGIN {printf "%c\n", '$1'}'
-				fi
-			;;
-			ch)
-				printf "%x\n" "'$1"
-			;;
-			hc)
-				#echo -e "\x${1#0x}"
-				printf '%d\n' "0x${1#0x}" | awk '{printf "%c\n", $1}'
-			;;
-			dh)
-				printf '%x\n' "$1"
-			;;
-			hd)
-				printf '%d\n' "0x${1#0x}"
+			c[dh]  ) echo "$1" | grep '^-' >/dev/null && { shift; continue; } ;;
+			b[dho] ) zztestar binario "$1"            || { shift; continue; } ;;
+			d[bohc]) zztestar numero  "$1"            || { shift; continue; } ;;
+			o[bdh] ) zztestar octal   "$1"            || { shift; continue; } ;;
+			h[bdoc]) zztestar hexa    "$1"            || { shift; continue; }
+				num_hex=$(echo ${1#0x} | tr [a-f] [A-F])
 			;;
 		esac
+
+		case "$operacao" in
+			# Escala:
+			y|z|a|f|p|n|u|m|c|d|un|D|H|K|M|G|T|P|E|Z|Y)
+				case "$1" in
+					y|z|a|f|p|n|u|m|c|d|un|D|H|K|M|G|T|P|E|Z|Y) operacao2="$1"; shift ;;
+				esac
+				num_hex=$(echo $operacao | sed 's/un/_/')
+				fator=$(echo "$potencias $(zztool index_var $num_hex $unid_escala)" | awk '{print $$NF}')
+				suf1=$(echo "$nome_escala $(zztool index_var $num_hex $unid_escala)" | awk '{print $$NF}')
+				if test -n "$operacao2"
+				then
+					num_hex=$(echo $operacao2 | sed 's/un/_/')
+					fator=$(echo "$potencias $(zztool index_var $num_hex $unid_escala)" | awk '{print '$fator' - $$NF}')
+					suf2=$(echo "$nome_escala $(zztool index_var $num_hex $unid_escala)" | awk '{print $$NF}')
+				else
+					suf2='un'
+				fi
+				test $fator -lt 0 && s2="scale=${fator#-}"
+				bc_expr="$s2;${1:-1}*10^$fator"
+			;;
+			# Temperatura:
+			cf) suf1="°C";                 suf2="°F";             bc_expr="$s2;($1*9/5)+32" ;;
+			fc) suf1="°F";                 suf2="°C";             bc_expr="$s2;($1-32)*5/9" ;;
+			ck) suf1="°C";                 suf2="K";              bc_expr="$s2;$1+273.15" ;;
+			kc) suf1="K";                  suf2="°C";             bc_expr="$s2;$1-273.15" ;;
+			fk) suf1="°F";                 suf2="K";              bc_expr="$s2;($1+459.67)/1.8" ;;
+			kf) suf1="K";                  suf2="°F";             bc_expr="$s2;($1*1.8)-459.67" ;;
+			# Distância:
+			km) suf1="km";                 suf2="mi";             bc_expr="$s2;$1*0.6214" ;;
+			mk) suf1="mi";                 suf2="km";             bc_expr="$s2;$1*1.609" ;;
+			mj) suf1="m";                  suf2="yd";             bc_expr="$s2;$1/0.9144" ;;
+			jm) suf1="yd";                 suf2="m";              bc_expr="$s2;$1*0.9144" ;;
+			mp) suf1="m";                  suf2="ft";             bc_expr="$s2;$1/0.3048" ;;
+			pm) suf1="ft";                 suf2="m";              bc_expr="$s2;$1*0.3048" ;;
+			jp) suf1="yd";                 suf2="ft";             bc_expr="$s2;$1*3" ;;
+			pj) suf1="ft";                 suf2="yd";             bc_expr="$s2;$1/3" ;;
+			# Número:
+				# Binário:
+				bo) suf1="em binário";     suf2="em octal";       bc_expr="obase=8;ibase=2;$1" ;;
+				bd) suf1="em binário";     suf2="em decimal";     bc_expr="ibase=2;$1" ;;
+				bh) suf1="em binário";     suf2="em hexadecimal"; bc_expr="obase=16;ibase=2;$1" ;;
+				# Decimal:
+				db) suf1="em decimal";     suf2="em binário";     bc_expr="obase=2;$1" ;;
+				do) suf1="em decimal";     suf2="em octal";       bc_expr="obase=8;$1" ;;
+				dh) suf1="em decimal";     suf2="em hexadecimal"; resp=$(printf '%x\n' "$1" | tr [a-f] [A-F]) ;;
+				# Octal:
+				ob) suf1="em octal";       suf2="em binário";     bc_expr="obase=2;ibase=8;${1#0}" ;;
+				od) suf1="em octal";       suf2="em decimal";     bc_expr="ibase=8;${1#0}" ;;
+				oh) suf1="em octal";       suf2="em hexadecimal"; bc_expr="obase=16;ibase=8;${1#0}" ;;
+				# Hexadecimal:
+				hb) suf1="em hexadecimal"; suf2="em binário";     bc_expr="obase=2;ibase=16;$num_hex" ;;
+				ho) suf1="em hexadecimal"; suf2="em octal";       bc_expr="obase=8;ibase=16;$num_hex" ;;
+				hd) suf1="em hexadecimal"; suf2="em decimal";     resp=$(printf '%d\n' "0x${1#0x}") ;;
+			# Caractere:
+				# Para:
+				dc | hc | oc)
+					case "$operacao" in
+						dc) suf1="em decimal";     fator="$1" ;;
+						hc) suf1="em hexadecimal"; fator=$(printf '%d\n' "0x${1#0x}") ;;
+						oc) suf1="em octal";       fator=$(echo "ibase=8;${1#0}" | bc) ;;
+					esac
+					suf2="em caractere"
+
+					if test "$fator" -ge 32 -a "$fator" -le 126
+					then
+						octal=$(printf "%03o\n" "$fator")
+						resp=$(printf "\\$octal")
+					elif test "$fator" -ge 161 -a "$fator" -le 191
+					then
+						octal=$(echo "obase=8;$fator" | bc)
+						resp=$(printf "\302\\$octal")
+					elif test "$fator" -ge 192 -a "$fator" -le 255
+					then
+							octal=$(printf '%03o' $((fator - 64)))
+							resp=$(printf "\303\\$octal")
+					fi
+				;;
+				# De:
+				cd) suf1="em caractere";  suf2="em decimal";     resp=$(printf "%d\n" "'$1") ;;
+				ch) suf1="em caractere";  suf2="em hexadecimal"; resp=$(printf "%x\n" "'$1" | tr [a-f] [A-F]) ;;
+				co) suf1="em caractere";  suf2="em octal";       resp=$(printf "%o\n" "'$1") ;;
+			# Ângulo:
+			gr) suf1="°";                 suf2="rad";            resp=$(echo "$s2;$pi;$1*pi/180" | bc -l | zznumero --para en | tr -d ,) ;;
+			rg) suf1="rad";               suf2="°";              resp=$(echo "$s2;$pi;$1*180/pi" | bc -l | zznumero --para en | tr -d ,) ;;
+			ga) suf1="°";                 suf2="gon";            resp=$(echo "$s2;$1/0.9" | bc -l | zznumero --para en | tr -d ,) ;;
+			ag) suf1="gon";               suf2="°";              resp=$(echo "$s2;$1*0.9" | bc -l | zznumero --para en | tr -d ,) ;;
+			ra) suf1="rad";               suf2="gon";            resp=$(echo "$s2;$pi;$1*200/pi" | bc -l | zznumero --para en | tr -d ,) ;;
+			ar) suf1="gon";               suf2="rad";            resp=$(echo "$s2;$pi;$1*pi/200" | bc -l | zznumero --para en | tr -d ,) ;;
+			* ) zztool erro "Conversão inválida $operacao"; return 1 ;;
+		esac
+
+		test -n "$bc_expr" && resp=$(echo "$bc_expr" | bc -l | sed 's/^\./0./')
+
+		if test -n "$resp"
+		then
+			if test "$opt" = "e"
+			then
+				test "$suf1" != "°" && suf1=" $suf1"
+				test "$suf2" != "°" && suf2=" $suf2"
+				echo "${1:-1}${suf1} = ${resp}${suf2}"
+			else
+				echo "$resp"
+			fi
+		fi
+
 		shift
 	done
 }
@@ -4677,9 +4626,10 @@ zzcotacao ()
 {
 	zzzz -h cotacao "$1" && return
 
-	$ZZWWWDUMP "http://www.infomoney.com.br/mercados/cambio" |
-	sed -n '/^Real vs. Moedas/,/^Cota/p' |
-	sed -n '3p;/^   [DLPFIE]/p' |
+	zztool eco "Infomoney"
+	zztool dump "http://www.infomoney.com.br/mercados/cambio" |
+	sed -n '/REAL VS. MOEDAS/,/mais cota/p' |
+	sed  '1d; $d;/^ *$/d;/n\/d/d;s/\[...png\]/        /' |
 	sed 's/Venda  *Var/Venda Var/;s/\[//g;s/\]//g' |
 	zzsemacento |
 	awk '{
@@ -4689,45 +4639,116 @@ zzcotacao ()
 			if (NF == 5) printf "%-18s  %6s  %6s  %6s\n", $1 " " $2, $3, $4, $5
 		}
 	}'
+
+	zztool eco "\nUOL - Economia"
+	# Faz a consulta e filtra o resultado
+	zztool dump 'http://economia.uol.com.br/cotacoes' |
+		tr -s ' ' |
+		sed -n '/Dólar comercial /,/Fonte Thompson Reuters/ {
+			# Linha original:
+			# Dólar com. 2,6203 2,6212 -0,79%
+
+			# faxina
+			/Bovespa/d
+			/\]/d
+			/^[[:blank:]]*$/d
+			/Fonte Thompson Reuters/d
+			s/com\./Comercial/
+			s/tur\./Turismo /
+			s/^[[:blank:]]*//
+			s/[[:blank:]]*$//
+			s/.*Dólar comercial[^0-9]*//
+			s/Variação/Var(%)/
+			s/arg\./Argentino/
+			s/\(.*\) - \(.*\) \{0,1\}\([0-9][0-9]h[0-9][0-9]\)*/\2|\3\
+\1/
+		p
+		}' |
+		awk '
+		NR==1
+		{
+			if ( NR == 2 ) printf "%18s  %6s  %6s   %6s\n", "", $1, $2, $3
+			if ( NR >  2 ) {
+				if (NF == 4 && $2 != "n/d" && $3 != "n/d") printf "%-18s  %6s  %6s  %6s\n", $1, $2, $3, $4
+				if (NF == 5 && $3 != "n/d" && $4 != "n/d") printf "%-18s  %6s  %6s  %6s\n", $1 " " $2, $3, $4, $5
+			}
+		}'
 }
 
 # ----------------------------------------------------------------------------
 # zzcpf
-# Cria, valida ou formata um número de CPF.
+# Cria, valida, formata ou retorna o(s) estado(s) de um número de CPF.
 # Obs.: O CPF informado pode estar formatado (pontos e hífen) ou não.
-# Uso: zzcpf [-f] [cpf]
-# Ex.: zzcpf 123.456.789-09          # valida o CPF informado
-#      zzcpf 12345678909             # com ou sem pontuação
-#      zzcpf                         # gera um CPF válido (aleatório)
-#      zzcpf -f 12345678909          # formata, adicionando pontuação
+# Uso: zzcpf [-f|-F|-e|-q] [cpf]
+# Ex.: zzcpf 123.456.789-09      # valida o CPF informado
+#      zzcpf 12345678909         # com ou sem pontuação
+#      zzcpf                     # gera um CPF válido (aleatório)
+#      zzcpf -f 12345678909      # formata, adicionando pontuação
+#      zzcpf -F 12345678909      # desformata, tirando pontuação
+#      zzcpf -e 12345678909      # estado(s) de um CPF Válido
+#      zzcpf -q 12345678909      # apenas código de retorno, sem mensagens
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2004-12-23
-# Versão: 3
+# Versão: 4
 # Licença: GPL
-# Requisitos: zzaleatorio
+# Requisitos: zzaleatorio zzcut
 # ----------------------------------------------------------------------------
 zzcpf ()
 {
 	zzzz -h cpf "$1" && return
 
-	local i n somatoria digito1 digito2 cpf base
+	local i n somatoria digito1 digito2 cpf base op estados auxiliar quieto
 
 	# Remove pontuação do CPF informado, deixando apenas números
 	cpf=$(echo "$*" | tr -d -c 0123456789)
 
-	# Talvez só precisamos formatar e nada mais?
+	#Retorna estado(s) ao qual o CPF pertence
+	if test "$1" = '-e'
+	then
+		# Se o CPF estiver vazio, define com zero
+		: ${cpf:=0}
+
+		# Só continua se o CPF for válido
+		auxiliar=$(zzcpf $cpf 2>&1)
+		if test "$auxiliar" != 'CPF válido'
+		then
+			zztool erro "$auxiliar"
+			return 1
+		fi
+
+		# Uso da função zzcut para captura do 9o digito
+		op=$(echo "$cpf" | zzcut -c 9)
+
+		#Atribui estado(s) ao qual o CPF pertence
+		case $op in
+			0) estados="Rio Grande do Sul";;
+			1) estados="Distrito Federal, Goiás, Mato Grosso, Mato Grosso do Sul ou Tocantins";;
+			2) estados="Amazonas, Pará, Roraima, Amapá, Acre ou Rondônia";;
+			3) estados="Ceará, Maranhão ou Piauí";;
+			4) estados="Paraíba, Pernambuco, Alagoas ou Rio Grande do Norte";;
+			5) estados="Bahia ou Sergipe";;
+			6) estados="Minas Gerais";;
+			7) estados="Rio de Janeiro ou Espírito Santo";;
+			8) estados="São Paulo";;
+			9) estados="Paraná ou Santa Catarina";;
+		esac
+
+		echo "$estados"
+		return 0
+	fi
+
+	# CPF válido formatado
 	if test "$1" = '-f'
 	then
 		# Remove os zeros do início (senão é considerado um octal)
 		cpf=$(echo "$cpf" | sed 's/^0*//')
 
-		# Se o CPF estiver vazio, define com zero
-		: ${cpf:=0}
-
-		if test ${#cpf} -gt 11
+		# Só continua se o CPF for válido
+		auxiliar=$(zzcpf $cpf 2>&1)
+		if test "$auxiliar" != 'CPF válido'
 		then
-			zztool erro 'CPF inválido (passou de 11 dígitos)'
+			zztool erro "$auxiliar"
 			return 1
 		fi
 
@@ -4745,26 +4766,68 @@ zzcpf ()
 		return 0
 	fi
 
+	# CPF válido não formatado
+	if test "$1" = '-F'
+	then
+		# Se o CPF estiver vazio, gera um aleatoriamente sem formatação
+		if test "${#cpf}" -eq 0
+		then
+			zzcpf | tr -d -c '0123456789\n'
+			return 0
+		fi
+
+		# Remove os zeros do início (senão é considerado um octal)
+		cpf=$(echo "$cpf" | sed 's/^0*//')
+
+		# Só continua se o CPF for válido
+		auxiliar=$(zzcpf $cpf 2>&1)
+		if test "$auxiliar" != 'CPF válido'
+		then
+			zztool erro "$auxiliar"
+			return 1
+		fi
+
+		printf "%011d\n" "$cpf"
+		return 0
+	fi
+
+	# Devo ocultar a saída ou mensagem de erro?
+	test "$1" = '-q' && quieto=1
+
 	# Extrai os números da base do CPF:
 	# Os 9 primeiros, sem os dois dígitos verificadores.
 	# Esses dois dígitos serão calculados adiante.
 	if test -n "$cpf"
 	then
+
+		# Completa com zeros à esquerda, caso necessário
+		cpf=$(printf %011d "$cpf")
+
 		# Faltou ou sobrou algum número...
 		if test ${#cpf} -ne 11
 		then
-			zztool erro 'CPF inválido (deve ter 11 dígitos)'
-			return 1
-		fi
-
-		if test $cpf -eq 0
-		then
-			zztool erro 'CPF inválido (não pode conter apenas zeros)'
+			test -n "$quieto" || zztool erro 'CPF inválido (deve ter 11 dígitos)'
 			return 1
 		fi
 
 		# Apaga os dois últimos dígitos
 		base="${cpf%??}"
+
+		#Inicia um laço para comparar a base com todas as possíveis situações:
+		#De 000.00..-00 até 999.99..-99
+		for ((i=0;i<10;i++))
+			do
+			#Atribuição de variável auxiliar para comparação de cada situação
+				auxiliar=$(echo "$base" | sed "s/$i/X/g")
+
+			#Compara o valor atual da variável auxiliar com a base e, caso seja verdadeiro, retorna o erro
+				if test "$auxiliar" = "XXXXXXXXX"
+				then
+					test -n "$quieto" || zztool erro "CPF inválido (não pode conter os 9 primeiros digitos iguais)"
+					return 1
+				fi
+			done
+		#Fim do laço de verificação de digitos repetidos
 	else
 		# Não foi informado nenhum CPF, vamos gerar um escolhendo
 		# nove dígitos aleatoriamente para formar a base
@@ -4849,12 +4912,406 @@ zzcpf ()
 		# Compara os verificadores informados com os calculados.
 		if test "${cpf#?????????}" = "$digito1$digito2"
 		then
-			echo 'CPF válido'
+			test -n "$quieto" || echo 'CPF válido'
 		else
 			# Boa ação do dia: mostrar quais os verificadores corretos
-			zztool erro "CPF inválido (deveria terminar em $digito1$digito2)"
+			test -n "$quieto" || zztool erro "CPF inválido (deveria terminar em $digito1$digito2)"
 			return 1
 		fi
+	fi
+}
+
+# ----------------------------------------------------------------------------
+# zzcut
+# Exibe partes selecionadas de linhas de cada ARQUIVO/STDIN na saída padrão.
+# É uma emulação do comando cut, com recursos adicionais.
+#
+# Opções:
+#  -c LISTA    seleciona apenas estes caracteres.
+#
+#  -d DELIM    usa DELIM em vez de TAB (padrão) como delimitador de campo.
+#
+#  -f LISTA    seleciona somente estes campos; também exibe qualquer
+#              linha que não contenha o caractere delimitador.
+#
+#  -s          não emite linhas que não contenham delimitadores.
+#
+#  -D TEXTO    usa TEXTO como delimitador da saída
+#              o padrão é usar o delimitador de entrada.
+#
+#  -v          Inverter o sentido, apagando as partes selecionadas.
+#
+#  Obs.:  1) Se o delimitador da entrada for uma Expressão Regular,
+#            é recomendando declarar o delimitador de saída.
+#         2) Se o delimitador de entrada for ou possuir:
+#             - '\' (contra-barra), use '\\' (1 escape) para cada '\'.
+#             - '/' (barra), use '[/]' (lista em ER) para cada '/'.
+#         3) Se o delimitador de saída for ou possuir:
+#             - '\' (contra-barra), use '\\\\' (3 escapes) para cada '\'.
+#             - '/' (barra), use '\/' (1 escape) para cada '/'.
+#
+#  Use uma, e somente uma, das opções -c ou -f.
+#  Cada LISTA é feita de um ou vários intervalos separados por vírgulas.
+#  Cada intervalo da lista exibe seu trecho, mesmo se for repetido.
+#
+#  Cada intervalo pode ser:
+#    N     caractere ou campo na posição N, começando por 1.
+#    N-    Do caractere ou campo na posição N até o fim da linha.
+#    N-M   Do caractere ou campo na posição N até a posição M.
+#    -M    Do primeiro caractere ou campo até a posição M.
+#    -     Do primeiro caractere ou campo até ao fim da linha.
+#    N~M   Do caractere ou campo na posição N até o final indo em M saltos.
+#    ~M    Do começo até o fim da linha em M saltos de caracteres ou campos.
+#    d     Caractere "d", posicionar o delimitador na saida de caracteres.
+#
+# Uso: zzcut <-c|-f> <número[s]|range> [-d <delimitador>] [-v]
+# Ex.: zzcut -c 5,2 arq.txt     # 5º caractere, seguido pelo 2º caractere
+#      zzcut -c 7-4,9- arq.txt  # 7º ao 4º e depois do 9º ao fim da linha
+#      zzcut -v -c 3-8 arq.txt  # Exclui do 3º ao 8º caractere
+#      zzcut -f 1,-,3  arq.txt  # 1º campo, toda linha e 3º campo
+#      zzcut -v -f 6-  arq.txt  # Exclui a partir do 6º campo
+#      zzcut -f 8,8,8 -d ";" arq.txt   # 8º campo 3 vezes. Delimitador ";"
+#      zzcut -f 10,6 -d: -D _ arq.txt  # 10º e 6º campos, novo delimitador _
+#      zzcut -c 1,d,10 -D: arq.txt     # 1º e 10º caracteres. Delimitador :
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2016-02-09
+# Versão: 4
+# Licença: GPL
+# Requisitos: zzunescape
+# ----------------------------------------------------------------------------
+zzcut ()
+{
+
+	zzzz -h cut "$1" && return
+
+	# Verificação dos parâmetros
+	test -n "$1" || { zztool -e uso cut; return 1; }
+
+	local tipo range ofd codscript qtd_campos only_delim inverte sp rlm
+	local delim=$(printf '\t')
+
+	# Recurso para oferecer a oportunidade de aspas serem usadas no delimitador
+	# Usando um caractere não imprimível no lugar da aspas
+	local aspas=$(echo "&zwnj;" | zzunescape --html)
+
+	# Definindo qual delimitador apresenta a aspas pelos dois bits na variável
+	# O primeiro bit define o delimitador na entrada
+	# O segundo bit define o delimitador na saída
+	# 0 = não há aspas no delimitador
+	# 1 = há aspas no delimitador
+	local bit_aspas='00'
+
+	# Opções de linha de comando
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+			-c*)
+				# Caracter
+				test -n "$tipo" && { zztool erro "Somente um tipo de lista pode ser especificado"; return 1; }
+				tipo='c'
+				range="${1#-c}"
+				if test -z "$range"
+				then
+					range="$2"
+					shift
+				fi
+				shift
+			;;
+			-f*)
+				# Campo
+				test -n "$tipo" && { zztool erro "Somente um tipo de lista pode ser especificado"; return 1; }
+				tipo='f'
+				range="${1#-f}"
+				if test -z "$range"
+				then
+					range="$2"
+					shift
+				fi
+				shift
+			;;
+			-d*)
+				# Definindo delimitador para opção campo
+				unset delim
+				delim="${1#-d}"
+				if test -z "$delim"
+				then
+					delim="$2"
+					shift
+				fi
+
+				# Apenas usa o recurso se houver aspas no delimitador de entrada
+				if zztool grep_var '"' "$delim"
+				then
+					delim=$(echo "$delim" | sed 's/"/'${aspas}'/g')
+					bit_aspas=$(echo "$bit_aspas" | sed 's/^./1/')
+				fi
+				shift
+			;;
+			-D*)
+				ofd="${1#-D}"
+				if test -z "$ofd"
+				then
+					ofd="$2"
+					shift
+				fi
+				shift
+			;;
+			# Apenas linha que possuam delimitadores
+			-s) only_delim='1'; shift ;;
+			# Invertendo a seleção
+			-v) inverte='1';    shift ;;
+			* ) break ;;
+		esac
+	done
+
+	# Um tipo de lista é mandatório
+	test -z "$tipo" && { zztool erro "Deve-se especificar uma lista de caracteres ou campos"; return 1; }
+
+	# O range é mandatório, seja qual for o tipo
+	# O range só pode ser composto de números [0-9], traço [-], til [~], vírgula [,]  ou "d"
+	if test -n "$range"
+	then
+		if echo "${range#=}" | grep -E '^[d0-9,~-]{1,}$' 2>/dev/null >/dev/null
+		then
+			range=$(echo "${range#=}" | sed 's/[^,]d//g;s/d[^,]//g;s/,,*/,/g;s/^,//;s/,$//')
+
+			case "$tipo" in
+				c)
+					if test "$inverte" = '1'
+					then
+						sp=$(echo "&thinsp;" | zzunescape --html)
+						codscript=$(
+							echo "$range" | zztool list2lines | sort -n |
+							awk -v tsp="$sp" '
+								# Apagar linha toda
+								/^-$/ { print "s/.*//";exit }
+								# Apagar desde o início da linha até um caractere
+								/^-[0-9]+$/ && NR==1 {sub(/-/,""); inicio = $1 }
+								# Apagar de um caractere até o fim da linha
+								/^[0-9]+-$/ {sub(/-/,""); print "s/^\\(.\\{"$1-1"\\}\\).*$/\\1/;"; exit}
+								Apagar um caractere ou um trecho
+								/^[0-9]+(-[0-9]+)*$/ {
+									if ($1 ~ /^[0-9]+$/ && $1 > inicio ) { printf "s/./" tsp "/" $1 ";" }
+									else {
+										split("", faixa); split($1, faixa, "-")
+										if (faixa[1] == faixa[2] && faixa[1] > inicio ) { printf "s/./" tsp "/" faixa[1] ";" }
+										else {
+											if (faixa[2] < faixa[1]) {
+												temp = faixa[2]; faixa[2] = faixa[1]; faixa[1] = temp
+											}
+											for (i=faixa[1]; i<=faixa[2]; i++) { printf "s/./" tsp "/" i ";" }
+										}
+									}
+								}
+								# Apagar caracteres em saltos N~M.
+								/^[0-9]*~[0-9]+$/ {
+									split("", faixa); split($1, faixa, "~")
+									faixa[2]*=(faixa[2]>=0?1:-1)
+									faixa[2]=(faixa[2]==0?1:faixa[2])
+									faixa[1]=(length(faixa[1])>0 && faixa[1]>0?faixa[1]:faixa[2])
+									printf "s/./" tsp "/" faixa[1] "\n :ini\n s/\\(" tsp ".\\{" faixa[2]-1 "\\}\\)[^" tsp "]/\\1" tsp "/\n t ini\n"
+								}
+								END {
+									if (inicio) print "s/^.\\{" inicio "\\}//;"
+									print "p"
+								}
+							'
+						)
+					else
+						ofd="${ofd:-$delim}"
+						rlm=$(echo "&rlm;" | zzunescape --html)
+
+						qtd_campos=$(echo "$range" |
+								awk -F "," '{
+									while(NF){
+										if ($NF ~ /^[0-9]*~[0-9]+$/ || $NF ~ /^[0-9]*-[0-9]*$/ || $NF ~ /^[d0-9]+$/) i++
+										NF--
+									}
+									print i
+								}'
+							)
+
+						codscript=$(
+							echo "$range" |
+							awk -F "," -v ofs="$ofd" -v rlm="$rlm" 'BEGIN {print "h;"} {
+								for (i=1; i<=NF; i++) {
+									# Apenas um número, um caractere
+									if ($i ~ /^[0-9]+$/) print "g;" ($i>1 ? "s/^.\\{1,"$i-1"\\}//;" : "" ) "s/^\\(.\\).*/\\1/;p"
+									# Linha inteira ou faixa N-M (faixa de caracteres)
+									if ($i ~ /^-$/) print "g;p"
+									else if ($i ~ /^[0-9]*-[0-9]*$/) {
+										split("", faixa); split($i, faixa, "-")
+										faixa[1]=(length(faixa[1])>0?faixa[1]:1)
+										faixa[2]=(length(faixa[2])>0?faixa[2]:"*")
+										# Se segundo número for menor
+										if (faixa[2]!="*" && faixa[2] < faixa[1]) {
+											temp = faixa[2]; faixa[2] = faixa[1]; faixa[1] = temp
+											inv=1
+										}
+										else inv=0
+										printf "g;" (faixa[1]>1 ? "s/^.\\{1,"faixa[1]-1"\\}//;" : "" )
+										print "s/^\\(." (faixa[2]!="*"?"\\{":"") faixa[2]-faixa[1]+1 (faixa[2]!="*"?"\\}":"") "\\)" (faixa[2]!="*"?".*":"") "/" (inv==1?rlm:"") "\\1/;p"
+									}
+									# Caracteres em saltos N~M.
+									if ($i ~ /^[0-9]*~[0-9]+$/) {
+										split("", faixa); split($i, faixa, "~")
+										faixa[2]*=(faixa[2]>=0?1:-1)
+										faixa[2]=(faixa[2]==0?1:faixa[2])
+										faixa[1]=(length(faixa[1])>0 && faixa[1]>0?faixa[1]:faixa[2])
+										printf "g;" ( faixa[1]>1 ? "s/^.\\{1," faixa[1]-1 "\\}//;" : "" )
+										if (faixa[2]>1) printf "s/\\(.\\).\\{" faixa[2]-1 "\\}/\\1/g;"
+										print "p"
+									}
+									if ($i == "d") { print "g;s/.*/" ofs "/g;p" }
+								}
+							}'
+						)
+					fi
+				;;
+				f)
+					ofd="${ofd:-$delim}"
+					# Apenas usa o recurso se houver aspas no delimitador de saída
+					if zztool grep_var '"' "$ofd"
+					then
+						ofd=$(echo "$ofd" | sed 's/"/'${aspas}'/g')
+						bit_aspas=$(echo "$bit_aspas" | sed 's/.$/1/')
+					fi
+
+					if test "$only_delim" = "1"
+					then
+						only_delim=$(zztool endereco_sed "$delim")
+					fi
+
+					if test "$inverte" = '1'
+					then
+						codscript=$(
+							echo "$range" | zztool list2lines | sort -n |
+							awk -v ofs="$ofd" 'BEGIN { print "BEGIN { OFS=\"" ofs "\" } { " }
+								{
+								# Apenas um número, um campo
+								if ($1 ~ /^[0-9]+$/) { print "$" $1 "=\"\""}
+								# Uma faixa N-M, uma faixa de campos
+								if ($1 ~ /^[0-9]*-[0-9]*$/) {
+									split("", faixa); split($1, faixa, "-")
+									faixa[1]=(length(faixa[1])>0?faixa[1]:1)
+									faixa[2]=(length(faixa[2])>0?faixa[2]:"FIM")
+									# Se segundo número for menor
+									if (faixa[2] < faixa[1]) {
+										temp = faixa[2]; faixa[2] = faixa[1]; faixa[1] = temp
+									}
+									if (faixa[2]=="FIM") {
+										print " ate_fim(" faixa[1] ", \"\", 1) "
+									}
+									else {
+										for (j=faixa[1]; j<=faixa[2]; j++) {
+											print "$" j "=\"\""
+										}
+									}
+								}
+								# Apagar caracteres em saltos N~M.
+								if ($1 ~ /^[0-9]*~[0-9]+$/) {
+									split("", faixa); split($1, faixa, "~")
+									faixa[2]=(faixa[2]==0?1:faixa[2])
+									faixa[1]=(length(faixa[1])>0 && faixa[1]>0?faixa[1]:faixa[2])
+									print " ate_fim(" faixa[1] ", \"\", " faixa[2] ") "
+								}
+							}
+							END { print " print }" }'
+						)
+					else
+						codscript=$(
+						echo "$range" |
+						awk -F"," -v ofs="$ofd" '{
+							printf "{ printf "
+							for (i=1; i<=NF; i++) {
+								# Apenas um número, um campo
+								if ($i ~ /^[0-9]+$/) { printf "$" $i "\"" ofs "\""}
+								# Uma faixa N-M, uma faixa de campos
+								if ($i ~ /^[0-9]*-[0-9]*$/) {
+									split("", faixa); split($i, faixa, "-")
+									faixa[1]=(length(faixa[1])>0?faixa[1]:1)
+									faixa[2]=(length(faixa[2])>0?faixa[2]:"FIM")
+
+									if (faixa[2]=="FIM") {
+										printf " ate_fim("faixa[1] ", \"" ofs "\", 1) "
+									}
+									else if (faixa[2] < faixa[1]) {
+										for (j=faixa[1]; j>=faixa[2]; j--) {
+											printf "$" j "\"" ofs "\""
+										}
+									}
+									else {
+										for (j=faixa[1]; j<=faixa[2]; j++) {
+											printf "$" j "\"" ofs "\""
+										}
+									}
+								}
+								# Caracteres em saltos N~M.
+								if ($i ~ /^[0-9]*~[0-9]+$/) {
+									split("", faixa); split($i, faixa, "~")
+									faixa[2]=(faixa[2]==0?1:faixa[2])
+									faixa[1]=(length(faixa[1])>0 && faixa[1]>0?faixa[1]:faixa[2])
+									printf " ate_fim(" faixa[1] ", \"" ofs "\", " faixa[2] ") "
+								}
+							}
+							printf "; print \"\" }"
+						}' 2>/dev/null
+					)
+				fi
+				;;
+			esac
+
+		else
+			zztool erro "Formato inválido para a lista de caracteres ou campos"; return 1
+		fi
+	else
+		zztool erro "Deve-se definir pelo menos um range de caracteres ou campos"; return 1
+	fi
+
+	zztool file_stdin "$@" |
+	if echo "$bit_aspas" | grep '^1' >/dev/null
+	then
+		sed 's/"/'${aspas}'/g'
+	else
+		cat -
+	fi |
+	case "$tipo" in
+		c)
+			sed -n "$codscript" |
+			if test "$inverte" = '1'
+			then
+				sed "s/$sp//g"
+			else
+				sed "
+				/$rlm/ {
+					:ini
+					s/\(.*\)$rlm\(.\)/\2\1$rlm/
+					t ini
+					s/$rlm//g
+				}
+				" |
+				awk -v div="${qtd_campos:-1}" '{ printf $0 }; NR % div == 0 { print ""}'
+			fi
+		;;
+		f)
+			awk -F "$delim" -v tsp="$inverte" "
+				function ate_fim (ini, sep, salto,  saida) {
+						for (i=ini; i<=NF; i+=salto) {
+							if (tsp == 1) { \$i=\"\" }
+							else { saida = saida \$i sep }
+						}
+						if (tsp != 1) return saida
+				}
+				$only_delim $codscript" 2>/dev/null |
+				sed "s/\(${ofd}\)\{2,\}/${ofd}/g;s/^${ofd}//;s/${ofd}$//"
+		;;
+	esac |
+	if test "$bit_aspas" != '00'
+	then
+		sed 's/'${aspas}'/"/g'
+	else
+		cat -
 	fi
 }
 
@@ -4905,548 +5362,6 @@ zzdado ()
 
 	# Gera e exibe um numero aleatorio entre 1 e o total de faces
 	zzaleatorio 1 $n_faces
-}
-
-# ----------------------------------------------------------------------------
-# zzdata
-# Calculadora de datas, trata corretamente os anos bissextos.
-# Você pode somar ou subtrair dias, meses e anos de uma data qualquer.
-# Você pode informar a data dd/mm/aaaa ou usar palavras como: hoje, ontem.
-# Usar a palavra dias informa número de dias desde o começo do ano corrente.
-# Ou os dias da semana como: domingo, seg, ter, qua, qui, sex, sab, dom.
-# Na diferença entre duas datas, o resultado é o número de dias entre elas.
-# Se informar somente uma data, converte para número de dias (01/01/1970 = 0).
-# Se informar somente um número (de dias), converte de volta para a data.
-# Esta função também pode ser usada para validar uma data.
-#
-# Uso: zzdata [data [+|- data|número<d|m|a>]]
-# Ex.: zzdata                           # que dia é hoje?
-#      zzdata anteontem                 # que dia foi anteontem?
-#      zzdata dom                       # que dia será o próximo domingo?
-#      zzdata hoje + 15d                # que dia será daqui 15 dias?
-#      zzdata hoje - 40d                # e 40 dias atrás, foi quando?
-#      zzdata 31/12/2010 + 100d         # 100 dias após a data informada
-#      zzdata 29/02/2001                # data inválida, ano não-bissexto
-#      zzdata 29/02/2000 + 1a           # 28/02/2001 <- respeita bissextos
-#      zzdata 01/03/2000 - 11/11/1999   # quantos dias há entre as duas?
-#      zzdata hoje - 07/10/1977         # quantos dias desde meu nascimento?
-#      zzdata 21/12/2012 - hoje         # quantos dias para o fim do mundo?
-#
-# Autor: Aurelio Marinho Jargas, www.aurelio.net
-# Desde: 2003-02-07
-# Versão: 5
-# Licença: GPL
-# Tags: data, cálculo
-# ----------------------------------------------------------------------------
-zzdata ()
-{
-	zzzz -h data "$1" && return
-
-	local yyyy mm dd mmdd i m y op dias_ano dias_mes dias_neste_mes
-	local valor operacao quantidade grandeza
-	local tipo tipo1 tipo2
-	local data data1 data2
-	local dias dias1 dias2
-	local delta delta1 delta2
-	local epoch=1970
-	local dias_mes_ok='31 28 31 30 31 30 31 31 30 31 30 31'  # jan-dez
-	local dias_mes_rev='31 30 31 30 31 31 30 31 30 31 28 31' # dez-jan
-	local valor1="$1"
-	local operacao="$2"
-	local valor2="$3"
-
-	# Verificação dos parâmetros
-	case $# in
-		0)
-			# Sem argumentos, mostra a data atual
-			zzdata hoje
-			return
-		;;
-		1)
-			# Delta sozinho é relativo ao dia atual
-			case "$1" in
-				[0-9]*[dma])
-					zzdata hoje + "$1"
-					return
-				;;
-			esac
-		;;
-		3)
-			# Validação rápida
-			if test "$operacao" != '-' -a "$operacao" != '+'
-			then
-				zztool erro "Operação inválida '$operacao'. Deve ser + ou -."
-				return 1
-			fi
-		;;
-		*)
-			zztool -e uso data
-			return 1
-		;;
-	esac
-
-	# Validação do conteúdo de $valor1 e $valor2
-	# Formato válidos: 31/12/1999, 123, -123, 5d, 5m, 5a, hoje
-	#
-	# Este bloco é bem importante, pois além de validar os dados
-	# do usuário, também povoa as variáveis que serão usadas na
-	# tomada de decisão adiante. São elas:
-	# $tipo1 $tipo2 $data1 $data2 $dias1 $dias2 $delta1 $delta2
-	#
-	# Nota: é o eval quem salva estas variáveis.
-
-	for i in 1 2
-	do
-		# Obtém o conteúdo de $valor1 ou $valor2
-		eval "valor=\$valor$i"
-
-		# Cancela se i=2 e só temos um valor
-		test -z "$valor" && break
-
-		# Identifica o tipo do valor e faz a validação
-		case "$valor" in
-
-			# Data no formato dd/mm/aaaa
-			??/??/?*)
-
-				tipo='data'
-				yyyy="${valor##*/}"
-				ddmm="${valor%/*}"
-
-				# Data em formato válido?
-				zztool -e testa_data "$valor" || return 1
-
-				# 29/02 em um ano não-bissexto?
-				if test "$ddmm" = '29/02' && ! zztool testa_ano_bissexto "$yyyy"
-				then
-					zztool erro "Data inválida '$valor', pois $yyyy não é um ano bissexto."
-					return 1
-				fi
-			;;
-
-			# Delta de dias, meses ou anos: 5d, 5m, 5a
-			[0-9]*[dma])
-
-				tipo='delta'
-
-				# Validação
-				if ! echo "$valor" | grep '^[0-9][0-9]*[dma]$' >/dev/null
-				then
-					zztool erro "Delta inválido '$valor'. Deve ser algo como 5d, 5m ou 5a."
-					return 1
-				fi
-			;;
-
-			# Número negativo ou positivo
-			-[0-9]* | [0-9]*)
-
-				tipo='dias'
-
-				# Validação
-				if ! zztool testa_numero_sinal "$valor"
-				then
-					zztool erro "Número inválido '$valor'"
-					return 1
-				fi
-			;;
-
-			# Apelidos: hoje, ontem, etc
-			[a-z]*)
-
-				tipo='data'
-
-				# Converte apelidos em datas
-				case "$valor" in
-					today | hoje)
-						valor=$(date +%d/%m/%Y)
-					;;
-					yesterday | ontem)
-						valor=$(zzdata hoje - 1)
-					;;
-					anteontem)
-						valor=$(zzdata hoje - 2)
-					;;
-					tomorrow | amanh[aã])
-						valor=$(zzdata hoje + 1)
-					;;
-					dom | domingo)
-						valor=$(zzdata hoje + $(echo "7 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
-					;;
-					sab | s[aá]bado)
-						valor=$(zzdata hoje + $(echo "6 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
-					;;
-					sex | sexta)
-						valor=$(zzdata hoje + $(echo "5 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
-					;;
-					qui | quinta)
-						valor=$(zzdata hoje + $(echo "4 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
-					;;
-					qua | quarta)
-						valor=$(zzdata hoje + $(echo "3 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
-					;;
-					ter | ter[cç]a)
-						valor=$(zzdata hoje + $(echo "2 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
-					;;
-					seg | segunda)
-						valor=$(zzdata hoje + $(echo "1 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
-					;;
-					days | dias)
-						# Quantidade transcorridos de dias do ano.
-						valor=$(date +%j)
-					;;
-					fim)
-						valor=21/12/2012  # ;)
-					;;
-					*)
-						zztool erro "Data inválida '$valor', deve ser dd/mm/aaaa"
-						return 1
-				esac
-
-				# Exceção: se este é o único argumento, mostra a data e sai
-				if test $# -eq 1
-				then
-					echo "$valor"
-					return 0
-				fi
-			;;
-			*)
-				zztool erro "Data inválida '$valor', deve ser dd/mm/aaaa"
-				return 1
-			;;
-		esac
-
-		# Salva as variáveis $data/$dias/$delta e $tipo,
-		# todas com os sufixos 1 ou 2 no nome. Por isso o eval.
-		# Exemplo: data1=01/01/1970; tipo1=data
-		eval "$tipo$i=$valor; tipo$i=$tipo"
-	done
-
-	# Validação: Se há um delta, o outro valor deve ser uma data ou número
-	if test "$tipo1" = 'delta' -a "$tipo2" = 'delta'
-	then
-		zztool -e uso data
-		return 1
-	fi
-
-	# Se chamada com um único argumento, é uma conversão simples.
-	# Se veio uma data, converta para um número.
-	# Se veio um número, converta para uma data.
-	# E pronto.
-
-	if test $# -eq 1
-	then
-		case $tipo1 in
-
-			data)
-				#############################################################
-				### Conversão DATA -> NÚMERO
-				#
-				# A data dd/mm/aaaa é transformada em um número inteiro.
-				# O resultado é o número de dias desde $epoch (01/01/1970).
-				# Se a data for anterior a $epoch, o número será negativo.
-				# Anos bissextos são tratados corretamente.
-				#
-				# Exemplos:
-				#      30/12/1969 = -2
-				#      31/12/1969 = -1
-				#      01/01/1970 = 0
-				#      02/01/1970 = 1
-				#      03/01/1970 = 2
-				#
-				#      01/02/1970 = 31    (31 dias do mês de janeiro)
-				#      01/01/1971 = 365   (um ano)
-				#      01/01/1980 = 3652  (365 * 10 anos + 2 bissextos)
-
-				data="$data1"
-
-				# Extrai os componentes da data: ano, mês, dia
-				yyyy=${data##*/}
-				mm=${data#*/}
-				mm=${mm%/*}
-				dd=${data%%/*}
-
-				# Retira os zeros à esquerda (pra não confundir com octal)
-				mm=${mm#0}
-				dd=${dd#0}
-				yyyy=$(echo "$yyyy" | sed 's/^00*//; s/^$/0/')
-
-				# Define o marco inicial e a direção dos cálculos
-				if test $yyyy -ge $epoch
-				then
-					# +Epoch: Inicia em 01/01/1970 e avança no tempo
-					y=$epoch          # ano
-					m=1               # mês
-					op='+'            # direção
-					dias=0            # 01/01/1970 == 0
-					dias_mes="$dias_mes_ok"
-				else
-					# -Epoch: Inicia em 31/12/1969 e retrocede no tempo
-					y=$((epoch - 1))  # ano
-					m=12              # mês
-					op='-'            # direção
-					dias=-1           # 31/12/1969 == -1
-					dias_mes="$dias_mes_rev"
-				fi
-
-				# Ano -> dias
-				while :
-				do
-					# Sim, os anos bissextos são levados em conta!
-					dias_ano=365
-					zztool testa_ano_bissexto $y && dias_ano=366
-
-					# Vai somando (ou subtraindo) até chegar no ano corrente
-					test $y -eq $yyyy && break
-					dias=$(($dias $op $dias_ano))
-					y=$(($y $op 1))
-				done
-
-				# Meses -> dias
-				for i in $dias_mes
-				do
-					# Fevereiro de ano bissexto tem 29 dias
-					test $dias_ano -eq 366 -a $i -eq 28 && i=29
-
-					# Vai somando (ou subtraindo) até chegar no mês corrente
-					test $m -eq $mm && break
-					m=$(($m $op 1))
-					dias=$(($dias $op $i))
-				done
-				dias_neste_mes=$i
-
-				# -Epoch: o número de dias indica o quanto deve-se
-				# retroceder à partir do último dia do mês
-				test $op = '-' && dd=$(($dias_neste_mes - $dd))
-
-				# Somando os dias da data aos anos+meses já contados.
-				dias=$(($dias $op $dd))
-
-				# +Epoch: É subtraído um do resultado pois 01/01/1970 == 0
-				test $op = '+' && dias=$((dias - 1))
-
-				# Feito, só mostrar o resultado
-				echo "$dias"
-			;;
-
-			dias)
-				#############################################################
-				### Conversão NÚMERO -> DATA
-				#
-				# O número inteiro é convertido para a data dd/mm/aaaa.
-				# Se o número for positivo, temos uma data DEPOIS de $epoch.
-				# Se o número for negativo, temos uma data ANTES de $epoch.
-				# Anos bissextos são tratados corretamente.
-				#
-				# Exemplos:
-				#      -2 = 30/12/1969
-				#      -1 = 31/12/1969
-				#       0 = 01/01/1970
-				#       1 = 02/01/1970
-				#       2 = 03/01/1970
-
-				dias="$dias1"
-
-				if test $dias -ge 0
-				then
-					# POSITIVO: Inicia em 01/01/1970 e avança no tempo
-					y=$epoch          # ano
-					mm=1              # mês
-					op='+'            # direção
-					dias_mes="$dias_mes_ok"
-				else
-					# NEGATIVO: Inicia em 31/12/1969 e retrocede no tempo
-					y=$((epoch - 1))  # ano
-					mm=12             # mês
-					op='-'            # direção
-					dias_mes="$dias_mes_rev"
-
-					# Valor negativo complica, vamos positivar: abs()
-					dias=$((0 - dias))
-				fi
-
-				# O número da Epoch é zero-based, agora vai virar one-based
-				dd=$(($dias $op 1))
-
-				# Dias -> Ano
-				while :
-				do
-					# Novamente, o ano bissexto é levado em conta
-					dias_ano=365
-					zztool testa_ano_bissexto $y && dias_ano=366
-
-					# Vai descontando os dias de cada ano para saber quantos anos cabem
-
-					# Não muda o ano se o número de dias for insuficiente
-					test $dd -lt $dias_ano && break
-
-					# Se for exatamente igual ao total de dias, não muda o
-					# ano se estivermos indo adiante no tempo (> Epoch).
-					# Caso contrário vai mudar pois cairemos no último dia
-					# do ano anterior.
-					test $dd -eq $dias_ano -a $op = '+' && break
-
-					dd=$(($dd - $dias_ano))
-					y=$(($y $op 1))
-				done
-				yyyy=$y
-
-				# Dias -> mês
-				for i in $dias_mes
-				do
-					# Fevereiro de ano bissexto tem 29 dias
-					test $dias_ano -eq 366 -a $i -eq 28 && i=29
-
-					# Calcula quantos meses cabem nos dias que sobraram
-
-					# Não muda o mês se o número de dias for insuficiente
-					test $dd -lt $i && break
-
-					# Se for exatamente igual ao total de dias, não muda o
-					# mês se estivermos indo adiante no tempo (> Epoch).
-					# Caso contrário vai mudar pois cairemos no último dia
-					# do mês anterior.
-					test $dd -eq $i -a $op = '+' && break
-
-					dd=$(($dd - $i))
-					mm=$(($mm $op 1))
-				done
-				dias_neste_mes=$i
-
-				# Ano e mês estão OK, agora sobraram apenas os dias
-
-				# Se estivermos antes de Epoch, os número de dias indica quanto
-				# devemos caminhar do último dia do mês até o primeiro
-				test $op = '-' && dd=$(($dias_neste_mes - $dd))
-
-				# Restaura o zero dos meses e dias menores que 10
-				test $dd -le 9 && dd="0$dd"
-				test $mm -le 9 && mm="0$mm"
-
-				# E finalmente mostra o resultado em formato de data
-				echo "$dd/$mm/$yyyy"
-			;;
-
-			*)
-				zztool erro "Tipo inválido '$tipo1'. Isso não deveria acontecer :/"
-				return 1
-			;;
-		esac
-		return 0
-	fi
-
-	# Neste ponto só chega se houver mais de um parâmetro.
-	# Todos os valores já foram validados.
-
-	#############################################################
-	### Cálculos com datas
-	#
-	# Temos dois valores informadas pelo usuário: $valor1 e $valor2.
-	# Cada valor pode ser uma data dd/mm/aaaa, um número inteiro
-	# ou um delta de dias, meses ou anos.
-	#
-	# Exemplos: 31/12/1999, 123, -123, 5d, 5m, 5a
-	#
-	# O usuário pode fazer qualquer combinação entre estes valores.
-	#
-	# Se o cálculo envolver deltas m|a, é usada a data dd/mm/aaaa.
-	# Senão, é usado o número inteiro que representa a data.
-	#
-	# O tipo de cada valor é guardado em $tipo1-2.
-	# Dependendo do tipo, o valor foi guardado nas variáveis
-	# $data1-2, $dias1-2 ou $delta1-2.
-	# Use estas variáveis no bloco seguinte para tomar decisões.
-
-	# Cálculo com delta.
-	if test $tipo1 = 'delta' -o $tipo2 = 'delta'
-	then
-		# Nunca haverá dois valores do mesmo tipo, posso abusar:
-		delta="$delta1$delta2"
-		data="$data1$data2"
-		dias="$dias1$dias2"
-
-		quantidade=$(echo "$delta" | sed 's/[^0-9]//g')
-		grandeza=$(  echo "$delta" | sed 's/[^dma]//g')
-
-		case $grandeza in
-			d)
-				# O cálculo deve ser feito utilizando o número
-				test -z "$dias" && dias=$(zzdata "$data")  # data2n
-
-				# Soma ou subtrai o delta
-				dias=$(($dias $operacao $quantidade))
-
-				# Converte o resultado para dd/mm/aaaa
-				zzdata $dias
-				return
-			;;
-			m | a)
-				# O cálculo deve ser feito utilizando a data
-				test -z "$data" && data=$(zzdata "$dias")  # n2data
-
-				# Extrai os componentes da data: ano, mês, dia
-				yyyy=${data##*/}
-				mm=${data#*/}
-				mm=${mm%/*}
-				dd=${data%%/*}
-
-				# Retira os zeros à esquerda (pra não confundir com octal)
-				mm=${mm#0}
-				dd=${dd#0}
-				yyyy=$(echo "$yyyy" | sed 's/^00*//; s/^$/0/')
-
-				# Anos
-				if test $grandeza = 'a'
-				then
-					yyyy=$(($yyyy $operacao $quantidade))
-
-				# Meses
-				else
-					mm=$(($mm $operacao $quantidade))
-
-					# Se houver excedente no mês (>12), recalcula mês e ano
-					yyyy=$(($yyyy + $mm / 12))
-					mm=$(($mm % 12))
-
-					# Se negativou, ajusta os cálculos (voltou um ano)
-					if test $mm -le 0
-					then
-						yyyy=$(($yyyy - 1))
-						mm=$((12 + $mm))
-					fi
-				fi
-
-				# Se o resultado for 29/02 em um ano não-bissexto, muda pra 28/02
-				test $dd -eq 29 -a $mm -eq 2 &&	! zztool testa_ano_bissexto $yyyy && dd=28
-
-				# Restaura o zero dos meses e dias menores que 10
-				test $dd -le 9 && dd="0$dd"
-				test $mm -le 9 && mm="0$mm"
-
-				# Tá feito, basta montar a data
-				echo "$dd/$mm/$yyyy"
-				return 0
-			;;
-		esac
-
-	# Cálculo normal, sem delta
-	else
-		# Ambas as datas são sempre convertidas para inteiros
-		test "$tipo1" != 'dias' && dias1=$(zzdata "$data1")
-		test "$tipo2" != 'dias' && dias2=$(zzdata "$data2")
-
-		# Soma ou subtrai os valores
-		dias=$(($dias1 $operacao $dias2))
-
-		# Se as duas datas foram informadas como dd/mm/aaaa,
-		# o resultado é o próprio número de dias. Senão converte
-		# o resultado para uma data.
-		if test "$tipo1$tipo2" = 'datadata'
-		then
-			echo "$dias"
-		else
-			zzdata "$dias"  # n2data
-		fi
-	fi
 }
 
 # ----------------------------------------------------------------------------
@@ -5598,9 +5513,9 @@ zzdataestelar ()
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2011-05-24
-# Versão: 10
+# Versão: 11
 # Licença: GPL
-# Requisitos: zzdata zzminusculas zznumero
+# Requisitos: zzdata zzminusculas zznumero zzdiadasemana
 # Tags: data
 # ----------------------------------------------------------------------------
 zzdatafmt ()
@@ -5806,8 +5721,7 @@ zzdatafmt ()
 		d="${dd#0}"
 		mes=$(echo "$meses" | cut -d ' ' -f "$m" 2>/dev/null)
 		mmm=$(echo "$mes" | sed 's/\(...\).*/\1/')
-		sem=$(date -j -f "%Y-%m-%d" "$aaaa-$mm-$dd" +%w 2>/dev/null || date -d "$aaaa-$mm-$dd" +%w 2>/dev/null)
-		sem=$((sem + 1))
+		sem=$(zzdiadasemana -n $dd/$mm/$aaaa)
 		semana=$(echo "$semanas" | cut -d ' ' -f "$sem" 2>/dev/null)
 		sss=$(echo "$semana" | sed 's/\(...\).*/\1/')
 
@@ -5848,6 +5762,555 @@ zzdatafmt ()
 }
 
 # ----------------------------------------------------------------------------
+# zzdata
+# Calculadora de datas, trata corretamente os anos bissextos.
+# Você pode somar ou subtrair dias, meses e anos de uma data qualquer.
+# Você pode informar a data dd/mm/aaaa ou usar palavras como: hoje, ontem.
+# Usar a palavra dias informa número de dias desde o começo do ano corrente.
+# Ou os dias da semana como: domingo, seg, ter, qua, qui, sex, sab, dom.
+# Na diferença entre duas datas, o resultado é o número de dias entre elas.
+# Se informar somente uma data, converte para número de dias (01/01/1970 = 0).
+# Se informar somente um número (de dias), converte de volta para a data.
+# Esta função também pode ser usada para validar uma data.
+#
+# Uso: zzdata [data [+|- data|número<d|m|a>]]
+# Ex.: zzdata                           # que dia é hoje?
+#      zzdata anteontem                 # que dia foi anteontem?
+#      zzdata dom                       # que dia será o próximo domingo?
+#      zzdata hoje + 15d                # que dia será daqui 15 dias?
+#      zzdata hoje - 40d                # e 40 dias atrás, foi quando?
+#      zzdata 31/12/2010 + 100d         # 100 dias após a data informada
+#      zzdata 29/02/2001                # data inválida, ano não-bissexto
+#      zzdata 29/02/2000 + 1a           # 28/02/2001 <- respeita bissextos
+#      zzdata 01/03/2000 - 11/11/1999   # quantos dias há entre as duas?
+#      zzdata hoje - 07/10/1977         # quantos dias desde meu nascimento?
+#      zzdata 21/12/2012 - hoje         # quantos dias para o fim do mundo?
+#
+# Autor: Aurelio Marinho Jargas, www.aurelio.net
+# Desde: 2003-02-07
+# Versão: 5
+# Licença: GPL
+# Requisitos: zztestar
+# Tags: data, cálculo
+# ----------------------------------------------------------------------------
+zzdata ()
+{
+	zzzz -h data "$1" && return
+
+	local yyyy mm dd mmdd i m y op dias_ano dias_mes dias_neste_mes
+	local valor operacao quantidade grandeza
+	local tipo tipo1 tipo2
+	local data data1 data2
+	local dias dias1 dias2
+	local delta delta1 delta2
+	local epoch=1970
+	local dias_mes_ok='31 28 31 30 31 30 31 31 30 31 30 31'  # jan-dez
+	local dias_mes_rev='31 30 31 30 31 31 30 31 30 31 28 31' # dez-jan
+	local valor1="$1"
+	local operacao="$2"
+	local valor2="$3"
+
+	# Verificação dos parâmetros
+	case $# in
+		0)
+			# Sem argumentos, mostra a data atual
+			zzdata hoje
+			return
+		;;
+		1)
+			# Delta sozinho é relativo ao dia atual
+			case "$1" in
+				[0-9]*[dma])
+					zzdata hoje + "$1"
+					return
+				;;
+			esac
+		;;
+		3)
+			# Validação rápida
+			if test "$operacao" != '-' -a "$operacao" != '+'
+			then
+				zztool erro "Operação inválida '$operacao'. Deve ser + ou -."
+				return 1
+			fi
+		;;
+		*)
+			zztool -e uso data
+			return 1
+		;;
+	esac
+
+	# Validação do conteúdo de $valor1 e $valor2
+	# Formato válidos: 31/12/1999, 123, -123, 5d, 5m, 5a, hoje
+	#
+	# Este bloco é bem importante, pois além de validar os dados
+	# do usuário, também povoa as variáveis que serão usadas na
+	# tomada de decisão adiante. São elas:
+	# $tipo1 $tipo2 $data1 $data2 $dias1 $dias2 $delta1 $delta2
+	#
+	# Nota: é o eval quem salva estas variáveis.
+
+	for i in 1 2
+	do
+		# Obtém o conteúdo de $valor1 ou $valor2
+		eval "valor=\$valor$i"
+
+		# Cancela se i=2 e só temos um valor
+		test -z "$valor" && break
+
+		# Identifica o tipo do valor e faz a validação
+		case "$valor" in
+
+			# Data no formato dd/mm/aaaa
+			??/??/?*)
+
+				tipo='data'
+				yyyy="${valor##*/}"
+				ddmm="${valor%/*}"
+
+				# Data em formato válido?
+				zztool -e testa_data "$valor" || return 1
+
+				# 29/02 em um ano não-bissexto?
+				if test "$ddmm" = '29/02' && ! zztestar ano_bissexto "$yyyy"
+				then
+					zztool erro "Data inválida '$valor', pois $yyyy não é um ano bissexto."
+					return 1
+				fi
+			;;
+
+			# Delta de dias, meses ou anos: 5d, 5m, 5a
+			[0-9]*[dma])
+
+				tipo='delta'
+
+				# Validação
+				if ! echo "$valor" | grep '^[0-9][0-9]*[dma]$' >/dev/null
+				then
+					zztool erro "Delta inválido '$valor'. Deve ser algo como 5d, 5m ou 5a."
+					return 1
+				fi
+			;;
+
+			# Número negativo ou positivo
+			-[0-9]* | [0-9]*)
+
+				tipo='dias'
+
+				# Validação
+				if ! zztestar numero_sinal "$valor"
+				then
+					zztool erro "Número inválido '$valor'"
+					return 1
+				fi
+			;;
+
+			# Apelidos: hoje, ontem, etc
+			[a-z]*)
+
+				tipo='data'
+
+				# Converte apelidos em datas
+				case "$valor" in
+					today | hoje)
+						valor=$(date +%d/%m/%Y)
+					;;
+					yesterday | ontem)
+						valor=$(zzdata hoje - 1)
+					;;
+					anteontem)
+						valor=$(zzdata hoje - 2)
+					;;
+					tomorrow | amanh[aã])
+						valor=$(zzdata hoje + 1)
+					;;
+					dom | domingo)
+						valor=$(zzdata hoje + $(echo "7 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
+					;;
+					sab | s[aá]bado)
+						valor=$(zzdata hoje + $(echo "6 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
+					;;
+					sex | sexta)
+						valor=$(zzdata hoje + $(echo "5 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
+					;;
+					qui | quinta)
+						valor=$(zzdata hoje + $(echo "4 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
+					;;
+					qua | quarta)
+						valor=$(zzdata hoje + $(echo "3 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
+					;;
+					ter | ter[cç]a)
+						valor=$(zzdata hoje + $(echo "2 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
+					;;
+					seg | segunda)
+						valor=$(zzdata hoje + $(echo "1 $(date +%u)" | awk '{ print ($1 >= $2 ? $1 - $2 : 7 + ($1 - $2)) }'))
+					;;
+					days | dias)
+						# Quantidade transcorridos de dias do ano.
+						valor=$(date +%j)
+					;;
+					fim)
+						valor=21/12/2012  # ;)
+					;;
+					*)
+						zztool erro "Data inválida '$valor', deve ser dd/mm/aaaa"
+						return 1
+				esac
+
+				# Exceção: se este é o único argumento, mostra a data e sai
+				if test $# -eq 1
+				then
+					echo "$valor"
+					return 0
+				fi
+			;;
+			*)
+				zztool erro "Data inválida '$valor', deve ser dd/mm/aaaa"
+				return 1
+			;;
+		esac
+
+		# Salva as variáveis $data/$dias/$delta e $tipo,
+		# todas com os sufixos 1 ou 2 no nome. Por isso o eval.
+		# Exemplo: data1=01/01/1970; tipo1=data
+		eval "$tipo$i=$valor; tipo$i=$tipo"
+	done
+
+	# Validação: Se há um delta, o outro valor deve ser uma data ou número
+	if test "$tipo1" = 'delta' -a "$tipo2" = 'delta'
+	then
+		zztool -e uso data
+		return 1
+	fi
+
+	# Se chamada com um único argumento, é uma conversão simples.
+	# Se veio uma data, converta para um número.
+	# Se veio um número, converta para uma data.
+	# E pronto.
+
+	if test $# -eq 1
+	then
+		case $tipo1 in
+
+			data)
+				#############################################################
+				### Conversão DATA -> NÚMERO
+				#
+				# A data dd/mm/aaaa é transformada em um número inteiro.
+				# O resultado é o número de dias desde $epoch (01/01/1970).
+				# Se a data for anterior a $epoch, o número será negativo.
+				# Anos bissextos são tratados corretamente.
+				#
+				# Exemplos:
+				#      30/12/1969 = -2
+				#      31/12/1969 = -1
+				#      01/01/1970 = 0
+				#      02/01/1970 = 1
+				#      03/01/1970 = 2
+				#
+				#      01/02/1970 = 31    (31 dias do mês de janeiro)
+				#      01/01/1971 = 365   (um ano)
+				#      01/01/1980 = 3652  (365 * 10 anos + 2 bissextos)
+
+				data="$data1"
+
+				# Extrai os componentes da data: ano, mês, dia
+				yyyy=${data##*/}
+				mm=${data#*/}
+				mm=${mm%/*}
+				dd=${data%%/*}
+
+				# Retira os zeros à esquerda (pra não confundir com octal)
+				mm=${mm#0}
+				dd=${dd#0}
+				yyyy=$(echo "$yyyy" | sed 's/^00*//; s/^$/0/')
+
+				# Define o marco inicial e a direção dos cálculos
+				if test $yyyy -ge $epoch
+				then
+					# +Epoch: Inicia em 01/01/1970 e avança no tempo
+					y=$epoch          # ano
+					m=1               # mês
+					op='+'            # direção
+					dias=0            # 01/01/1970 == 0
+					dias_mes="$dias_mes_ok"
+				else
+					# -Epoch: Inicia em 31/12/1969 e retrocede no tempo
+					y=$((epoch - 1))  # ano
+					m=12              # mês
+					op='-'            # direção
+					dias=-1           # 31/12/1969 == -1
+					dias_mes="$dias_mes_rev"
+				fi
+
+				# Ano -> dias
+				while :
+				do
+					# Sim, os anos bissextos são levados em conta!
+					dias_ano=365
+					zztestar ano_bissexto $y && dias_ano=366
+
+					# Vai somando (ou subtraindo) até chegar no ano corrente
+					test $y -eq $yyyy && break
+					dias=$(($dias $op $dias_ano))
+					y=$(($y $op 1))
+				done
+
+				# Meses -> dias
+				for i in $dias_mes
+				do
+					# Fevereiro de ano bissexto tem 29 dias
+					test $dias_ano -eq 366 -a $i -eq 28 && i=29
+
+					# Vai somando (ou subtraindo) até chegar no mês corrente
+					test $m -eq $mm && break
+					m=$(($m $op 1))
+					dias=$(($dias $op $i))
+				done
+				dias_neste_mes=$i
+
+				# -Epoch: o número de dias indica o quanto deve-se
+				# retroceder à partir do último dia do mês
+				test $op = '-' && dd=$(($dias_neste_mes - $dd))
+
+				# Somando os dias da data aos anos+meses já contados.
+				dias=$(($dias $op $dd))
+
+				# +Epoch: É subtraído um do resultado pois 01/01/1970 == 0
+				test $op = '+' && dias=$((dias - 1))
+
+				# Feito, só mostrar o resultado
+				echo "$dias"
+			;;
+
+			dias)
+				#############################################################
+				### Conversão NÚMERO -> DATA
+				#
+				# O número inteiro é convertido para a data dd/mm/aaaa.
+				# Se o número for positivo, temos uma data DEPOIS de $epoch.
+				# Se o número for negativo, temos uma data ANTES de $epoch.
+				# Anos bissextos são tratados corretamente.
+				#
+				# Exemplos:
+				#      -2 = 30/12/1969
+				#      -1 = 31/12/1969
+				#       0 = 01/01/1970
+				#       1 = 02/01/1970
+				#       2 = 03/01/1970
+
+				dias="$dias1"
+
+				if test $dias -ge 0
+				then
+					# POSITIVO: Inicia em 01/01/1970 e avança no tempo
+					y=$epoch          # ano
+					mm=1              # mês
+					op='+'            # direção
+					dias_mes="$dias_mes_ok"
+				else
+					# NEGATIVO: Inicia em 31/12/1969 e retrocede no tempo
+					y=$((epoch - 1))  # ano
+					mm=12             # mês
+					op='-'            # direção
+					dias_mes="$dias_mes_rev"
+
+					# Valor negativo complica, vamos positivar: abs()
+					dias=$((0 - dias))
+				fi
+
+				# O número da Epoch é zero-based, agora vai virar one-based
+				dd=$(($dias $op 1))
+
+				# Dias -> Ano
+				while :
+				do
+					# Novamente, o ano bissexto é levado em conta
+					dias_ano=365
+					zztestar ano_bissexto $y && dias_ano=366
+
+					# Vai descontando os dias de cada ano para saber quantos anos cabem
+
+					# Não muda o ano se o número de dias for insuficiente
+					test $dd -lt $dias_ano && break
+
+					# Se for exatamente igual ao total de dias, não muda o
+					# ano se estivermos indo adiante no tempo (> Epoch).
+					# Caso contrário vai mudar pois cairemos no último dia
+					# do ano anterior.
+					test $dd -eq $dias_ano -a $op = '+' && break
+
+					dd=$(($dd - $dias_ano))
+					y=$(($y $op 1))
+				done
+				yyyy=$y
+
+				# Dias -> mês
+				for i in $dias_mes
+				do
+					# Fevereiro de ano bissexto tem 29 dias
+					test $dias_ano -eq 366 -a $i -eq 28 && i=29
+
+					# Calcula quantos meses cabem nos dias que sobraram
+
+					# Não muda o mês se o número de dias for insuficiente
+					test $dd -lt $i && break
+
+					# Se for exatamente igual ao total de dias, não muda o
+					# mês se estivermos indo adiante no tempo (> Epoch).
+					# Caso contrário vai mudar pois cairemos no último dia
+					# do mês anterior.
+					test $dd -eq $i -a $op = '+' && break
+
+					dd=$(($dd - $i))
+					mm=$(($mm $op 1))
+				done
+				dias_neste_mes=$i
+
+				# Ano e mês estão OK, agora sobraram apenas os dias
+
+				# Se estivermos antes de Epoch, os número de dias indica quanto
+				# devemos caminhar do último dia do mês até o primeiro
+				test $op = '-' && dd=$(($dias_neste_mes - $dd))
+
+				# Restaura o zero dos meses e dias menores que 10
+				test $dd -le 9 && dd="0$dd"
+				test $mm -le 9 && mm="0$mm"
+
+				# E finalmente mostra o resultado em formato de data
+				echo "$dd/$mm/$yyyy"
+			;;
+
+			*)
+				zztool erro "Tipo inválido '$tipo1'. Isso não deveria acontecer :/"
+				return 1
+			;;
+		esac
+		return 0
+	fi
+
+	# Neste ponto só chega se houver mais de um parâmetro.
+	# Todos os valores já foram validados.
+
+	#############################################################
+	### Cálculos com datas
+	#
+	# Temos dois valores informadas pelo usuário: $valor1 e $valor2.
+	# Cada valor pode ser uma data dd/mm/aaaa, um número inteiro
+	# ou um delta de dias, meses ou anos.
+	#
+	# Exemplos: 31/12/1999, 123, -123, 5d, 5m, 5a
+	#
+	# O usuário pode fazer qualquer combinação entre estes valores.
+	#
+	# Se o cálculo envolver deltas m|a, é usada a data dd/mm/aaaa.
+	# Senão, é usado o número inteiro que representa a data.
+	#
+	# O tipo de cada valor é guardado em $tipo1-2.
+	# Dependendo do tipo, o valor foi guardado nas variáveis
+	# $data1-2, $dias1-2 ou $delta1-2.
+	# Use estas variáveis no bloco seguinte para tomar decisões.
+
+	# Cálculo com delta.
+	if test $tipo1 = 'delta' -o $tipo2 = 'delta'
+	then
+		# Nunca haverá dois valores do mesmo tipo, posso abusar:
+		delta="$delta1$delta2"
+		data="$data1$data2"
+		dias="$dias1$dias2"
+
+		quantidade=$(echo "$delta" | sed 's/[^0-9]//g')
+		grandeza=$(  echo "$delta" | sed 's/[^dma]//g')
+
+		case $grandeza in
+			d)
+				# O cálculo deve ser feito utilizando o número
+				test -z "$dias" && dias=$(zzdata "$data")  # data2n
+
+				# Soma ou subtrai o delta
+				dias=$(($dias $operacao $quantidade))
+
+				# Converte o resultado para dd/mm/aaaa
+				zzdata $dias
+				return
+			;;
+			m | a)
+				# O cálculo deve ser feito utilizando a data
+				test -z "$data" && data=$(zzdata "$dias")  # n2data
+
+				# Extrai os componentes da data: ano, mês, dia
+				yyyy=${data##*/}
+				mm=${data#*/}
+				mm=${mm%/*}
+				dd=${data%%/*}
+
+				# Retira os zeros à esquerda (pra não confundir com octal)
+				mm=${mm#0}
+				dd=${dd#0}
+				yyyy=$(echo "$yyyy" | sed 's/^00*//; s/^$/0/')
+
+				# Anos
+				if test $grandeza = 'a'
+				then
+					yyyy=$(($yyyy $operacao $quantidade))
+
+				# Meses
+				else
+					mm=$(($mm $operacao $quantidade))
+
+					# Se houver excedente no mês (>12), recalcula mês e ano
+					yyyy=$(($yyyy + $mm / 12))
+					mm=$(($mm % 12))
+
+					# Se negativou, ajusta os cálculos (voltou um ano)
+					if test $mm -le 0
+					then
+						yyyy=$(($yyyy - 1))
+						mm=$((12 + $mm))
+					fi
+				fi
+
+				# Se o resultado for 29/02 em um ano não-bissexto, muda pra 28/02
+				if test $mm -eq 2
+				then
+					test $dd -eq 29 && ! zztestar ano_bissexto $yyyy && dd=28
+					test $dd -gt 29 && zztestar ano_bissexto $yyyy && dd=29
+					# Se for 30 ou 31/02 em um ano não bissexto, muda para 01/03
+					test $dd -gt 29 && ! zztestar ano_bissexto $yyyy && { dd=1; mm=3; }
+				fi
+
+				# Restaura o zero dos meses e dias menores que 10
+				test $dd -le 9 && dd="0$dd"
+				test $mm -le 9 && mm="0$mm"
+
+				# Tá feito, basta montar a data
+				echo "$dd/$mm/$yyyy"
+				return 0
+			;;
+		esac
+
+	# Cálculo normal, sem delta
+	else
+		# Ambas as datas são sempre convertidas para inteiros
+		test "$tipo1" != 'dias' && dias1=$(zzdata "$data1")
+		test "$tipo2" != 'dias' && dias2=$(zzdata "$data2")
+
+		# Soma ou subtrai os valores
+		dias=$(($dias1 $operacao $dias2))
+
+		# Se as duas datas foram informadas como dd/mm/aaaa,
+		# o resultado é o próprio número de dias. Senão converte
+		# o resultado para uma data.
+		if test "$tipo1$tipo2" = 'datadata'
+		then
+			echo "$dias"
+		else
+			zzdata "$dias"  # n2data
+		fi
+	fi
+}
+
+# ----------------------------------------------------------------------------
 # zzdefinr
 # http://definr.com
 # Busca o significado de um termo, palavra ou expressão no site Definr.
@@ -5868,7 +6331,7 @@ zzdefinr ()
 
 	local word=$(echo "$*" | sed 's/ /%20/g')
 
-	$ZZWWWHTML "http://definr.com/$word" |
+	zztool source "http://definr.com/$word" |
 		sed '
 			/<div id="meaning">/,/<\/div>/!d
 			s/<[^>]*>//g
@@ -6067,14 +6530,19 @@ zzdicantonimos ()
 	fi
 
 	# Faz a busca do termo no site, deixando somente os antônimos
-	$ZZWWWDUMP "${url}?q=${palavra_busca}" |
+	zztool dump "${url}?q=${palavra_busca}" |
 		sed -n "/[0-9]\{1,\} antônimos\{0,1\} d/,/«/ {
 			/[0-9]\{1,\} antônimos\{0,1\} d/d
 			/«/d
 			/^$/d
 			s/^ *//
+			s/^[0-9]*\. //
+			s/,//g
+			s/\.$//
 			p
-		}"
+		}" |
+		awk '/:/ {printf (NR>1?"\n\n":"") $0 "\n"; next}; NF==0 {print ""}; {printf " " $0}' |
+		zztool nl_eof
 }
 
 # ----------------------------------------------------------------------------
@@ -6089,8 +6557,9 @@ zzdicantonimos ()
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2001-08-08
-# Versão: 1
+# Versão: 2
 # Licença: GPL
+# Requisitos: zzutf8
 # ----------------------------------------------------------------------------
 zzdicasl ()
 {
@@ -6110,8 +6579,8 @@ zzdicasl ()
 
 	# Faz a consulta e filtra o resultado
 	zztool eco "$url"
-	$ZZWWWHTML "$url" |
-		zztool texto_em_iso |
+	zztool source "$url" |
+		zzutf8 |
 		grep -i $opcao_grep "$*" |
 		sed -n 's@^<LI><A HREF=/arquivo/\([^>]*\)> *\([^ ].*\)</A>@\1@p'
 }
@@ -6120,23 +6589,23 @@ zzdicasl ()
 # zzdicbabylon
 # http://www.babylon.com
 # Tradução de uma palavra em inglês para vários idiomas.
-# Francês, alemão, japonês, italiano, hebreu, espanhol, holandês e português.
+# Francês, alemão, italiano, hebreu, espanhol, holandês e português.
 # Se nenhum idioma for informado, o padrão é o português.
-# Uso: zzdicbabylon [idioma] palavra   #idioma:dut fre ger heb ita jap ptg spa
+# Uso: zzdicbabylon [idioma] palavra   #idiomas: nl fr de he it pt es
 # Ex.: zzdicbabylon hardcore
-#      zzdicbabylon jap tree
+#      zzdicbabylon he tree
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2000-02-22
-# Versão: 1
+# Versão: 2
 # Licença: GPL
 # ----------------------------------------------------------------------------
 zzdicbabylon ()
 {
 	zzzz -h dicbabylon "$1" && return
 
-	local idioma='ptg'
-	local idiomas=' dut fre ger heb ita jap ptg spa '
+	local idioma='pt'
+	local idiomas=' nl fr de he it pt es '
 	local tab=$(printf %b '\t')
 
 	# Verificação dos parâmetros
@@ -6149,17 +6618,19 @@ zzdicbabylon ()
 		shift
 	fi
 
-	$ZZWWWHTML "http://online.babylon.com/cgi-bin/trans.cgi?lang=$idioma&word=$1" |
-		sed "
+	zztool source "http://bis.babylon.com/?rt=ol&tid=pop&mr=2&term=$1&tl=$idioma" |
+		sed '
 			/OT_CopyrightStyle/,$ d
-			/definition/,/<\/div>/!d
-			/GA_google/d
+			/div class="definition"/,/<\/div>/!d
 			s/^[$tab ]*//
 			s/<[^>]*>//g
 			/^$/d
 			N;s/\n/ /
+			s/<[^>]*>//g
+			s/^ *//
+			s/ *$//
 			s/      / /
-			" |
+			' |
 		zztool texto_em_utf8
 }
 
@@ -6177,8 +6648,9 @@ zzdicbabylon ()
 #
 # Autor: Fernando Aires <fernandoaires (a) gmail com>
 # Desde: 2005-05-20
-# Versão: 4
+# Versão: 5
 # Licença: GPL
+# Requisitos: zzurlencode
 # ----------------------------------------------------------------------------
 zzdicesperanto ()
 {
@@ -6188,7 +6660,7 @@ zzdicesperanto ()
 
 	local de_ling='pt'
 	local para_ling='eo'
-	local url="http://glosbe.com/"
+	local url="https://glosbe.com"
 	local pesquisa
 
 	while test "${1#-}" != "$1"
@@ -6237,7 +6709,7 @@ zzdicesperanto ()
 
 	pesquisa="$1"
 
-	$ZZWWWHTML $url/$de_ling/$para_ling/$pesquisa |
+	zztool source $(zzurlencode -n ':/' "$url/$de_ling/$para_ling/$pesquisa") |
 		sed -n 's/.*class=" phr">\([^<]*\)<.*/\1/p'
 }
 
@@ -6251,9 +6723,9 @@ zzdicesperanto ()
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2000-02-22
-# Versão: 1
+# Versão: 2
 # Licença: GPL
-# Requisitos: zztrim
+# Requisitos: zztrim zzdividirtexto
 # ----------------------------------------------------------------------------
 zzdicjargon ()
 {
@@ -6270,15 +6742,15 @@ zzdicjargon ()
 	# Se o cache está vazio, baixa listagem da Internet
 	if ! test -s "$cache"
 	then
-		$ZZWWWLIST "$url/go01.html" |
+		zztool list "$url/go01.html" |
 			sed '
-				/^ *[0-9][0-9]*\. /!d
+				#/^ *[0-9][0-9]*\. /!d
 				s@.*/html/@@
 				/^[A-Z0]\//!d' > "$cache"
 	fi
 
 	achei=$(grep -i "$padrao" $cache)
-	num=$(echo "$achei" | sed -n '$=')
+	num=$(echo "$achei" | zztool num_linhas)
 
 	test -n "$achei" || return
 
@@ -6291,8 +6763,14 @@ zzdicjargon ()
 
 	if test $num -eq 1
 	then
-		$ZZWWWDUMP -width=72 "$url/$achei" |
-			sed '1,/_\{9\}/d;/_\{9\}/,$d;/^$/d' | zztrim -l
+		zztool dump -w 500 "$url/$achei" |
+			awk '
+				$0  ~ /^$/  { branco++; if (branco == 3) { print "----------"; branco = 0 } }
+				$0 !~ /^$/  { for (i=1;i<=branco;i++) { print "" }; print ; branco = 0 }
+			' |
+			sed '1,/[_-]\{9\}/d;/[_-]\{9\}/,$d;/^$/d' |
+			zzdividirtexto 20 |
+			zztrim -l
 		test -n "$mais" && zztool eco '\nTermos parecidos:'
 	else
 		zztool eco 'Achei mais de um! Escolha qual vai querer:'
@@ -6305,21 +6783,16 @@ zzdicjargon ()
 # zzdicportugues
 # http://www.dicio.com.br
 # Dicionário de português.
-# Definição de palavras e conjugação verbal
 # Fornecendo uma "palavra" como argumento retorna seu significado e sinônimo.
 # Se for seguida do termo "def", retorna suas definições.
-# Se for seguida do termo "conj", retorna todas as formas de conjugação.
-# Pode-se filtrar pelos modos de conjugação, fornecendo após o "conj" o modo
-# desejado:
-# ind (indicativo), sub (subjuntivo), imp (imperativo), inf (infinitivo)
 #
-# Uso: zzdicportugues palavra [def|conj [ind|sub|conj|imp|inf]]
+# Uso: zzdicportugues palavra [def]
 # Ex.: zzdicportugues bolacha
-#      zzdicportugues verbo conj sub
+#      zzdicportugues comer def
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2003-02-26
-# Versão: 10
+# Versão: 11
 # Licença: GPL
 # Requisitos: zzsemacento zzminusculas zztrim
 # ----------------------------------------------------------------------------
@@ -6341,7 +6814,7 @@ zzdicportugues ()
 	# Verificando se a palavra confere na pesquisa
 	until test "$resultado" = "$palavra"
 	do
-		conteudo=$($ZZWWWDUMP "$url/$padrao")
+		conteudo=$(zztool dump "$url/$padrao")
 		resultado=$(
 		echo "$conteudo" |
 			sed -n "
@@ -6360,73 +6833,24 @@ zzdicportugues ()
 		padrao=${padrao}_${contador}
 	done
 
-	case "$2" in
-	def) ini='^Definição de '; fim=' escrit[ao] ao contrário: ' ;;
-	conj)
-		ini='^ *Infinitivo:';  fim='(Rimas com |Anagramas de )'
-		case "$3" in
-			ind)        ini='^ *Indicativo'; fim='^ *Subjuntivo' ;;
-			sub | conj) ini='^ *Subjuntivo'; fim='^ *Imperativo' ;;
-			imp)        ini='^ *Imperativo'; fim='^ *Infinitivo' ;;
-			inf)        ini='^ *Infinitivo *$' ;;
-		esac
-	;;
-	esac
+	if test "$2" = "def"
+	then
+		ini='^Definição de '; fim=' escrit[ao] ao contrário: '
+	fi
 
-	case "$2" in
-	conj)
-		echo "$conteudo" |
-		awk '/'"$ini"'/, /'"$fim"'/ ' |
-			sed '
-				{
-				/^ *INDICATIVO *$/d;
-				/^ *Indicativo *$/d;
-				/^ *SUBJUNTIVO *$/d;
-				/^ *Subjuntivo *$/d;
-				#/^ *CONJUNTIVO *$/d
-				#/^ *Conjuntivo *$/d
-				/^ *IMPERATIVO *$/d;
-				/^ *Imperativo *$/d;
-				/^ *INFINITIVO *$/d;
-				/^ *Infinitivo *$/d;
-				/Rimas com /d;
-				/Anagramas de /d;
-				/^ *$/d;
-				s/^ *//;
-				s/^\*/\
-&/;
-				#s/ do Indicativo/&\
-#/;
-				#s/ do Subjuntivo/&\
-#/;
-				#s/ do Conjuntivo/&\
-#/;
-				#s/\* Imperativo Afirmativo/&\
-#/;
-				#s/\* Imperativo Negativo/&\
-#/;
-				#s/\* Imperativo/&\
-#/;
-				#s/\* Infinitivo Pessoal/&\
-#/;
-				s/^[a-z]/ &/g;
-				#p
-				}' |
-				zztrim
-	;;
-	*)
-		echo "$conteudo" |
-		awk '/'"$ini"'/, /'"$fim"'/ ' |
-			sed "
-				1d
+	echo "$conteudo" |
+		sed -n "
+			/$ini/,/$fim/ {
+				/$ini/d
 				/^Definição de /d
+				/^ *Exemplos com .*${palavra}$/,/^ *Outras informações sobre /d
 				/^Sinônimos de /{N;d;}
 				/Mais sinônimos /d
 				/^Antônimos de /{N;d;}
-				/Mais antônimos /d" |
-			zztrim
-	;;
-	esac
+				/Mais antônimos /d
+				p
+			}" |
+		zztrim
 }
 
 # ----------------------------------------------------------------------------
@@ -6460,7 +6884,7 @@ zzdicsinonimos ()
 
 	# Faz a busca do termo e limpa, deixando somente os sinônimos
 	# O sed no final separa os sentidos, caso a palavra tenha mais de um
-	$ZZWWWDUMP "${url}?q=${parametro_busca}" |
+	zztool dump "${url}?q=${parametro_busca}" |
 		sed -n "
 			/[0-9]\{1,\} sinônimos\{0,1\} d/,/«/ {
 				/[0-9]\{1,\} sinônimos\{0,1\} d/d
@@ -6492,17 +6916,18 @@ zzdiffpalavra ()
 {
 	zzzz -h diffpalavra "$1" && return
 
-	local esc
-	local tmp1=$(zztool mktemp diffpalavra)
-	local tmp2=$(zztool mktemp diffpalavra)
+	local esc tmp1 tmp2
 	local n=$(printf '\a')
 
 	# Verificação dos parâmetros
 	test $# -ne 2 && { zztool -e uso diffpalavra; return 1; }
 
 	# Verifica se os arquivos existem
-	zztool arquivo_legivel "$1" || return 1
-	zztool arquivo_legivel "$2" || return 1
+	zztool -e arquivo_legivel "$1" || return 1
+	zztool -e arquivo_legivel "$2" || return 1
+
+	tmp1=$(zztool mktemp diffpalavra)
+	tmp2=$(zztool mktemp diffpalavra)
 
 	# Deixa uma palavra por linha e marca o início de parágrafos
 	sed "s/^[[:blank:]]*$/$n$n/;" "$1" | tr ' ' '\n' > "$tmp1"
@@ -6621,9 +7046,9 @@ zzdistro ()
 
 	test -n "$1" && { zztool -e uso distro; return 1; }
 
-	$ZZWWWHTML "$url" | sed '1,/>Rank</d' |
+	zztool source "$url" | sed '1,/>Rank</d' |
 	awk -F'"' '
-		/phr1/ || /<th class="News">[0-9]{1,3}<\/th>/ {
+		/phr1/ || /<th class="News">[0-9][0-9]?[0-9]?<\/th>/ {
 			printf "%s\t", $3
 			getline
 			printf "%s\thttp://distrowatch.com/%s\n", $5, $4
@@ -6639,6 +7064,57 @@ zzdistro ()
 }
 
 # ----------------------------------------------------------------------------
+# zzdividirtexto
+# Divide um texto por uma quantidade máxima de palavras por linha.
+# Sem argumento a quantidade padrão é 15
+#
+# Uso: zzdividirtexto [número]
+# Ex.: zzdividirtexto 10
+#      zzdividirtexto 3 Um texto para servir de exemplo no teste.
+#      cat arquivo.txt | zzdividirtexto
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2016-04-12
+# Versão: 1
+# Licença: GPL
+# ----------------------------------------------------------------------------
+zzdividirtexto ()
+{
+	zzzz -h dividirtexto "$1" && return
+
+	local palavras=15
+
+	# Definindo a quantidade de palavras por linha
+	if zztool testa_numero "$1"
+	then
+		# Tamanho zero não vale!
+		test "$1" -eq 0 && { zztool uso dividirtexto; return 1; }
+
+		palavras=$1
+		shift
+	fi
+
+	zztool multi_stdin "$@" |
+		# O sed separa as palavras cujo delimitador seja espaço ou tabulação.
+		# Obs.: ponto, dois-pontos, traço e vírgula não são considerados delimitadores.
+		# Então palavra seguida desses caracteres sem espaço na palavra seguinte
+		# são considerados uma única palavra.
+		sed "s|\(\([^[:blank:]]\{1,\}[[:blank:]]\{1,\}\)\{${palavras}\}\)|\1\\
+|g" |
+		# O sed deixa o último separador de cada linha no final.
+		# Usar a função trim eliminaria esse espaço que pode ser significativo.
+		# Então o awk, move o espaço final de uma linha, para o começo da próxima.
+		awk '{
+			if ( length(incluir) > 0 )  { sub(/^/, incluir); incluir = "" }
+			if ( match($0, /[ 	]+$/) ) {
+				incluir = substr($0, RSTART, RLENGTH)
+				sub(/[ 	]+$/, "")
+			}
+			print
+		}'
+}
+
+# ----------------------------------------------------------------------------
 # zzdivisores
 # Lista todos os divisores de um número inteiro e positivo, maior que 2.
 #
@@ -6647,9 +7123,8 @@ zzdistro ()
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-03-25
-# Versão: 3
+# Versão: 6
 # Licença: GPL
-# Requisitos: zzfatorar
 # ----------------------------------------------------------------------------
 zzdivisores ()
 {
@@ -6657,41 +7132,27 @@ zzdivisores ()
 
 	test -n "$1" || { zztool -e uso divisores; return 1; }
 
-	local fatores fator divisores_temp divisor divisor_atual
-	local divisores="1"
-
 	if zztool testa_numero "$1" && test $1 -ge 2
 	then
-		# Decompõe o número em fatores primos
-		fatores=$(zzfatorar --no-bc $1 | cut -f 2 -d "|" | zztool lines2list)
-
-		# Se for primo informa 1 e ele mesmo
-		zztool grep_var 'primo' "$fatores" && { echo "1 $1"; return; }
-
-		for fator in $fatores
-		do
-			# Para cada fator primo, multiplica-se pelos divisores já conhecidos
-			for divisor in $divisores
-			do
-				divisor_atual=$(($fator * $divisor))
-
-				# Apenas armazenando se divisor não existir
-				echo "$divisores_temp" | zztool list2lines | grep "^${divisor_atual}$" > /dev/null
-				if test $? -eq 1
-				then
-					divisores_temp=$( echo "$divisores_temp $divisor_atual")
-				fi
-			done
-
-			# Reabastece a variável divisores eliminando repetições
-			divisores=$(echo "$divisores $divisores_temp" | zztool list2lines | sort -n | uniq | zztool lines2list)
-		done
-
-		# Elimina-se as repetições e ordena-se os divisores encontrados
-		echo $divisores | zztool list2lines | sort -n | uniq | zztool lines2list | zztool nl_eof
+		# Código adaptado a partir da solução em:
+		# http://stackoverflow.com/questions/11699324/
+		echo "$1" |
+		awk '{
+				limits = sqrt($1)
+				for (i=1; i <= limits; i++) {
+					if ($1 % i == 0) {
+						print i
+						ind = $1 / i
+						if (i != ind ) print ind
+					}
+				}
+		}' |
+		sort -n |
+		zztool lines2list | zztool nl_eof
 	else
-		# Se não for um número válido exibe a ajuda
-		zzdivisores -h
+		# Se não for um número válido.
+		zztool erro "Apenas números naturais maiores ou iguais a 2."
+		return 1
 	fi
 }
 
@@ -6704,7 +7165,7 @@ zzdivisores ()
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2000-02-22
-# Versão: 5
+# Versão: 7
 # Licença: GPL
 # ----------------------------------------------------------------------------
 zzdolar ()
@@ -6712,19 +7173,23 @@ zzdolar ()
 	zzzz -h dolar "$1" && return
 
 	# Faz a consulta e filtra o resultado
-	$ZZWWWDUMP 'http://economia.uol.com.br/cotacoes' |
+	zztool dump 'http://economia.uol.com.br/cotacoes' |
+		tr -s ' ' |
 		egrep  'Dólar (com\.|tur\.|comercial)' |
 		sed '
 			# Linha original:
 			# Dólar com. 2,6203 2,6212 -0,79%
 
 			# faxina
+			/Bovespa/d
 			s/com\./Comercial/
+			s/  *\(CAPTION: \)\{0,1\}Dólar comercial/  Compra Venda Variação/
 			s/tur\./Turismo /
 			s/^  *Dólar //
-			s/^  *CAPTION: Dólar comercial -/  Compra Venda Variação/
-		' |
-		tr ' ' '\t'
+			s/[[:blank:]]*$//
+			s/\(.*\) - \(.*\) \{0,1\}\([0-9][0-9]h[0-9][0-9]\)*/\2|\3\
+\1/' |
+		tr ' |' '\t '
 }
 
 # ----------------------------------------------------------------------------
@@ -6771,7 +7236,7 @@ zzdominiopais ()
 		# Se o cache está vazio, baixa listagem da Internet
 		if ! test -s "$cache"
 		then
-			$ZZWWWDUMP "$url" > "$cache"
+			zztool dump "$url" > "$cache"
 		fi
 	fi
 
@@ -6798,8 +7263,7 @@ zzdos2unix ()
 {
 	zzzz -h dos2unix "$1" && return
 
-	local arquivo
-	local tmp=$(zztool mktemp dos2unix)
+	local arquivo tmp
 	local control_m=$(printf '\r')  # ^M, CR, \r
 
 	# Sem argumentos, lê/grava em STDIN/STDOUT
@@ -6811,12 +7275,15 @@ zzdos2unix ()
 		return
 	fi
 
+	# Definindo arquivo temporário quando há argumentos.
+	tmp=$(zztool mktemp dos2unix)
+
 	# Usuário passou uma lista de arquivos
 	# Os arquivos serão sobrescritos, todo cuidado é pouco
 	for arquivo
 	do
 		# O arquivo existe?
-		zztool arquivo_legivel "$arquivo" || continue
+		zztool -e arquivo_legivel "$arquivo" || continue
 
 		# Remove o \r
 		cp "$arquivo" "$tmp" &&
@@ -6956,9 +7423,9 @@ zzencoding ()
 #
 # Autor: Luciano ES
 # Desde: 2008-09-07
-# Versão: 6
+# Versão: 7
 # Licença: GPL
-# Requisitos: zztrim
+# Requisitos: zztrim zzutf8 zzsqueeze
 # ----------------------------------------------------------------------------
 zzenglish ()
 {
@@ -6967,8 +7434,7 @@ zzenglish ()
 	test -n "$1" || { zztool -e uso english; return 1; }
 
 	local cinza verde amarelo fecha
-	local url="http://www.dict.org/bin/Dict/"
-	local query="Form=Dict1&Query=$1&Strategy=*&Database=*&submit=Submit query"
+	local url="http://www.dict.org/bin/Dict?Form=Dict2&Database=*&Query=$1"
 
 	if test $ZZCOR -eq 1
 	then
@@ -6978,12 +7444,14 @@ zzenglish ()
 		fecha=$(  printf '\033[m')
 	fi
 
-	echo "$query" |
-		$ZZWWWPOST "$url" |
+	zztool dump "$url" | zzutf8 |
 		sed "
+			/Questions or comments about this site./d
+
 			# pega o trecho da página que nos interessa
-			/[0-9]\{1,\} definitions\{0,1\} found/,/_______________/!d
-			s/____*//
+			/[0-9]\{1,\} definitions\{0,1\} found/,/ *[_-][_-][_-][_-][_-]* *$/!d
+			s/_____*//
+			s/-----*//
 
 			# protege os colchetes dos sinônimos contra o cinza escuro
 			s/\[syn:/@SINONIMO@/g
@@ -7008,109 +7476,8 @@ zzenglish ()
 				p
 				x
 			}" |
-		zztrim -V -r
-}
-
-# ----------------------------------------------------------------------------
-# zzenviaemail
-# Envia email via ssmtp.
-# Opções:
-#   -h, --help     exibe a ajuda.
-#   -v, --verbose  exibe informações para debug durante o processamento.
-#   -V, --version  exibe a versão.
-#   -f, --from     email do remetente.
-#   -t, --to       email dos destinatários (separe com vírgulas, sem espaço).
-#   -c, --cc       email dos destinatários em cópia (vírgulas, sem espaço).
-#   -b, --bcc      emails em cópia oculta (vírgulas, sem espaço).
-#   -s, --subject  o assunto do email.
-#   -e, --mensagem arquivo que contém a mensagem/corpo do email.
-# Uso: zzenviaemail -f email -t email [-c email] [-b email] -s assunto -m msg
-# Ex.: zzenviaemail -f quem_envia@dominio.com -t quem_recebe@dominio.com \
-#      -s "Teste de e-mail" -m "./arq_msg.eml"
-#
-# Autor: Lauro Cavalcanti de Sa <lauro (a) ecdesa com>
-# Desde: 2009-09-17
-# Versão: 2
-# Licença: GPLv2
-# Requisitos: ssmtp
-# ----------------------------------------------------------------------------
-zzenviaemail ()
-{
-	zzzz -h enviaemail "$1" && return
-
-	# Declara variaveis.
-	local fromail tomail ccmail bccmail subject msgbody
-	local envia_data=`date +"%Y%m%d_%H%M%S_%N"`
-	local script_eml=$(zztool cache enviaemail "${envia_data}.eml")
-	local nparam=0
-
-	# Opcoes de linha de comando
-	while test $# -ge 1
-	do
-		case "$1" in
-			-f | --from)
-				test -n "$2" || { zztool -e uso enviaemail; set +x; return 1; }
-				fromail=$2
-				nparam=$(($nparam + 1))
-				shift
-				;;
-			-t | --to)
-				test -n "$2" || { zztool -e uso enviaemail; set +x; return 1; }
-				tomail=$2
-				nparam=$(($nparam + 1))
-				shift
-				;;
-			-c | --cc)
-				test -n "$2" || { zztool -e uso enviaemail; set +x; return 1; }
-				ccmail=$2
-				shift
-				;;
-			-b | --bcc)
-				test -n "$2" || { zztool -e uso enviaemail; set +x; return 1; }
-				bccmail=$2
-				shift
-				;;
-			-s | --subject)
-				test -n "$2" || { zztool -e uso enviaemail; set +x; return 1; }
-				subject=$2
-				nparam=$(($nparam + 1))
-				shift
-				;;
-			-m | --mensagem)
-				test -n "$2" || { zztool -e uso enviaemail; set +x; return 1; }
-				mensagem=$2
-				nparam=$(($nparam + 1))
-				shift
-				;;
-			-v | --verbose)
-				set -x
-				;;
-			*) { zztool -e uso enviaemail; set +x; return 1; } ;;
-		esac
-		shift
-	done
-
-	# Verifica numero minimo de parametros.
-	if test "${nparam}" != 4 ; then
-		{ zztool -e uso enviaemail; set +x; return 1; }
-	fi
-
-	# Verifica se o arquivo existe.
-	zztool arquivo_existe "${mensagem}"
-
-	# Monta e-mail padrao para envio via SMTP.
-	echo "From: ${fromail} <${fromail}>" > ${script_eml}
-	echo "To: ${tomail}" >> ${script_eml}
-	echo "Cc: ${ccmail}" >> ${script_eml}
-	echo "Bcc: ${bccmail}" >> ${script_eml}
-	echo "Subject: ${subject}" >> ${script_eml}
-	cat ${mensagem} >> ${script_eml}
-	ssmtp -F ${fromail} ${tomail} ${ccmail} ${bccmail} < ${script_eml}
-	if test -s "${script_eml}" ; then
-		zztool cache rm enviaemail
-	fi
-
-	set +x
+		zztrim -V -r |
+		zzsqueeze -l
 }
 
 # ----------------------------------------------------------------------------
@@ -7281,6 +7648,35 @@ TO:Tocantins:tocantins:Palmas"
 }
 
 # ----------------------------------------------------------------------------
+# zzexcuse
+# Da uma desculpa comum de desenvolvedor ( em ingles ).
+# Com a opção -t ou --traduzir mostra as desculpas traduzidas.
+#
+# Uso: zzexcuse [-t|--traduzir]
+# Ex.: zzexcuse
+#
+# Autor: Italo Gonçales, @goncalesi, <italo.goncales (a) gmail com>
+# Desde: 2015-09-26
+# Versão: 2
+# Licença: GPL
+# Requisitos: zztrim zztradutor
+# ----------------------------------------------------------------------------
+zzexcuse ()
+{
+	zzzz -h excuse "$1" && return
+
+	local url='http://programmingexcuses.com/'
+
+	zztool dump "$url" |
+	sed '$d;/Link: /d' |
+	zztrim |
+	case $1 in
+	-t | --traduzir ) zztradutor en-pt ;;
+	*) cat - ;;
+	esac
+}
+
+# ----------------------------------------------------------------------------
 # zzextensao
 # Informa a extensão de um arquivo.
 # Obs.: Caso o arquivo não possua extensão, retorna vazio "".
@@ -7317,71 +7713,46 @@ zzextensao ()
 
 # ----------------------------------------------------------------------------
 # zzfatorar
-# http://www.primos.mat.br
 # Fatora um número em fatores primos.
 # Com as opções:
-#   --atualiza: atualiza o cache com 10 mil primos (padrão e rápida).
-#   --atualiza-1m: atualiza o cache com 1 milhão de primos (mais lenta).
 #   --bc: saída apenas da expressão, que pode ser usado no bc, awk ou etc.
 #   --no-bc: saída apenas do fatoramento.
 #    por padrão exibe tanto o fatoramento como a expressão.
 #
 # Se o número for primo, é exibido a mensagem apenas.
 #
-# Uso: zzfatorar [--atualiza|--atualiza-1m] [--bc|--no-bc] <número>
+# Uso: zzfatorar [--bc | --no-bc] <número>
 # Ex.: zzfatorar 1458
 #      zzfatorar --bc 1296
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-03-14
-# Versão: 3
+# Versão: 4
 # Licença: GPL
-# Requisitos: zzjuntalinhas zzdos2unix
+# Requisitos: zzjuntalinhas zzdivisores
+# Nota: opcional factor
 # ----------------------------------------------------------------------------
 zzfatorar ()
 {
 	zzzz -h fatorar "$1" && return
 
-	local url='http://www.primos.mat.br/primeiros_10000_primos.txt'
 	local cache=$(zztool cache fatorar)
 	local linha_atual=1
 	local primo_atual=2
 	local bc=0
-	local num_atual saida tamanho indice
+	local num_atual saida tamanho indice linha
 
 	test -n "$1" || { zztool -e uso fatorar; return 1; }
 
 	while  test "${1#-}" != "$1"
 	do
 		case "$1" in
-		'--atualiza')
-			# Força atualizar o cache
-			zztool atualiza fatorar
-			shift
-		;;
-		'--atualiza-1m')
-			# Atualiza o cache com uma listagem com 1 milhão de números primos.
-			# É um processo bem mais lento, devendo ser usado quando o cache normal não atende.
-			rm -f "$cache"
-			if which 7z >/dev/null 2>&1 && ! which factor >/dev/null 2>&1
-			then
-				zztool eco "Atualizando cache."
-				wget -q http://www.primos.mat.br/dados/50M_part1.7z -O /tmp/primos.7z
-				7z e /tmp/primos.7z >/dev/null 2>&1
-				rm -f /tmp/primos.7z
-				awk '{for(i=1;i<=NF;i++) print $i }' 50M_part1.txt > "$cache"
-				rm -f 50M_part1.txt
-				zzdos2unix "$cache" >/dev/null 2>&1
-				zztool eco "Cache atualizado."
-			fi
-			shift
-		;;
-		'--bc')
+		--bc)
 			# Apenas sai a expressão matemática que pode ser usado no bc ou awk
 			test "$bc" -eq 0 && bc=1
 			shift
 		;;
-		'--no-bc')
+		--no-bc)
 			# Apenas sai a fatoração
 			test "$bc" -eq 0 && bc=2
 			shift
@@ -7398,12 +7769,19 @@ zzfatorar ()
 		then
 			# Se existe o camando factor usa-o
 			factor $1 | sed 's/.*: //g' | awk '{for(i=1;i<=NF;i++) print $i }' | uniq > "$cache"
-			primo_atual=$(head -n 1 "$cache")
-		elif ! test -s "$cache"
-		then
-			# Se o cache está vazio, baixa listagem da Internet
-			$ZZWWWDUMP "$url" | awk '{for(i=1;i<=NF;i++) print $i }' > "$cache"
+		else
+			# Aqui lista todos os divisores do número informado não considerando o 1
+			# E descobre entre os divisores, quem é primo usando zzdivisores novamente.
+			# Aqueles que tiverem apenas 2 divisores (primos) são mantidos, além do próprio número.
+			zzdivisores $1 |
+			tr ' ' '\n' |
+			sed '1d; $!{ /.\{1,\}[024568]$/d; }' |
+			while read linha
+			do
+				zzdivisores $linha | awk 'NF==2 {print $2}'
+			done > "$cache"
 		fi
+		primo_atual=$(head -n 1 "$cache")
 
 		# Se o número fornecido for primo, retorna-o e sai
 		grep "^${1}$" ${cache} > /dev/null
@@ -7417,6 +7795,7 @@ zzfatorar ()
 		do
 
 			# Repetindo a divisão pelo número primo atual, enquanto for exato
+			# e ecoando a fatoração formatada
 			while test $((${num_atual} % ${primo_atual})) -eq 0
 			do
 				test "$bc" != "1" && printf "%${tamanho}s | %s\n" ${num_atual} ${primo_atual}
@@ -7425,7 +7804,8 @@ zzfatorar ()
 				test "$bc" != "1" -a "${num_atual}" = "1" && { printf "%${tamanho}s |\n" 1; break; }
 			done
 
-			# Se o número atual é primo
+			# Se o número atual é primo finaliza a fatoração
+			# ecoando os 2 últimos elementos
 			grep "^${num_atual}$" ${cache} > /dev/null
 			if test "$?" = "0"
 			then
@@ -7438,7 +7818,7 @@ zzfatorar ()
 				break
 			fi
 
-			# Definindo o número primo a ser usado
+			# Definindo o próximo número primo a ser usado
 			if test "${num_atual}" != "1"
 			then
 				linha_atual=$((${linha_atual} + 1))
@@ -7449,12 +7829,22 @@ zzfatorar ()
 
 		if test "$bc" != "2"
 		then
-			saida=$(echo "$saida " | sed 's/ /&\
-/g' | sed '/^ *$/d;s/^ *//g' | uniq -c | awk '{ if ($1==1) {print $2} else {print $2 "^" $1} }' | zzjuntalinhas -d ' * ')
+			# Formatando a fórmula ao final da fatoração
+			saida=$(
+				echo "$saida " |
+				tr ' ' '\n' |
+				sed '/^ *$/d;s/^ *//g' |
+				uniq -c |
+				awk '{ if ($1==1) {print $2} else {print $2 "^" $1} }' |
+				zzjuntalinhas -d ' * '
+			)
 			test "$bc" -eq "1" || echo
 			echo "$1 = $saida"
 		fi
 	fi
+
+	# Limpeza
+	rm -f "$cache"
 }
 
 # ----------------------------------------------------------------------------
@@ -7462,18 +7852,23 @@ zzfatorar ()
 # Leitor de Feeds RSS, RDF e Atom.
 # Se informar a URL de um feed, são mostradas suas últimas notícias.
 # Se informar a URL de um site, mostra a URL do(s) Feed(s).
-# Obs.: Use a opção -n para limitar o número de resultados (Padrão é 10).
+#
+# Opções:
+#  -n para limitar o número de resultados (Padrão é 10).
+#  -u para simular navegador Mozilla/Firefox (alguns sites precisam disso).
+#
 # Para uso via pipe digite dessa forma: "zzfeed -", mesma forma que o cat.
 #
 # Uso: zzfeed [-n número] URL...
 # Ex.: zzfeed http://aurelio.net/feed/
 #      zzfeed -n 5 aurelio.net/feed/          # O http:// é opcional
 #      zzfeed aurelio.net funcoeszz.net       # Mostra URL dos feeds
+#      zzfeed -u funcoeszz.net                # UserAgent do lynx diferente
 #      cat arquivo.rss | zzfeed -             # Para uso via pipe
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2011-05-03
-# Versão: 7
+# Versão: 11
 # Licença: GPL
 # Requisitos: zzxml zzunescape zztrim zzutf8
 # ----------------------------------------------------------------------------
@@ -7481,16 +7876,19 @@ zzfeed ()
 {
 	zzzz -h feed "$1" && return
 
-	local url formato tag_mae tmp
+	local url formato tag_mae tmp useragent cache
 	local limite=10
 
 	# Opções de linha de comando
-	if test "$1" = '-n'
-	then
-		limite=$2
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+		-n) limite=$2; shift ;;
+		-u) useragent='-u "Mozilla/5.0"' ;;
+		* ) break ;;
+		esac
 		shift
-		shift
-	fi
+	done
 
 	# Verificação dos parâmetros
 	test -n "$1" || { zztool -e uso feed; return 1; }
@@ -7537,23 +7935,23 @@ zzfeed ()
 	# </rss>
 	#-----------------------------------------------------------------
 
+	tmp=$(zztool mktemp feed)
+	cache=$(zztool mktemp feed)
+
 	# Para cada URL que o usuário informou...
 	for url
 	do
-		tmp=$(zztool mktemp feed)
-
 		# Só mostra a url se houver mais de uma
 		test $# -gt 1 && zztool eco "* $url"
 
 		# Baixa e limpa o conteúdo do feed
 		if test "$1" = "-"
 		then
-			zztool file_stdin "$@"
+			cat - | zzutf8 | zzxml --tidy > "$tmp"
 		else
-			$ZZWWWHTML "$url"
-		fi |
-			zzutf8 |
-			zzxml --tidy > "$tmp"
+			zztool download $useragent "$url" "$cache"
+			zzutf8 "$cache" | zzxml --tidy > "$tmp"
+		fi
 
 		# Tenta identificar o formato: <feed> é Atom, <rss> é RSS
 		formato=$(grep -e '^<feed[ >]' -e '^<rss[ >]' -e '^<rdf[:>]' "$tmp")
@@ -7597,11 +7995,10 @@ zzfeed ()
 					s/['\"]//g"
 		fi
 
-		rm -f "$tmp"
-
 		# Linha em branco para separar resultados
 		[ $# -gt 1 ] && echo
 	done
+	rm -f "$tmp" "$cache"
 }
 
 # ----------------------------------------------------------------------------
@@ -7665,7 +8062,7 @@ zzferiado ()
 	carnaval=$(dirname $(zzcarnaval $ano ) )
 	sextapaixao=$(dirname $(zzsextapaixao $ano ) )
 	corpuschristi=$(dirname $(zzcorpuschristi $ano ) )
-	feriados="01/01:Confraternização Universal $carnaval:Carnaval $sextapaixao:Sexta-ferida da Paixao 21/04:Tiradentes 01/05:Dia do Trabalho $corpuschristi:Corpu Christi 07/09:Independência do Brasil 12/10:Nossa Sra. Aparecida 02/11:Finados 15/11:Proclamação da República 25/12:Natal $ZZFERIADO"
+	feriados="01/01:Confraternização Universal $carnaval:Carnaval $sextapaixao:Sexta-feira da Paixao 21/04:Tiradentes 01/05:Dia do Trabalho $corpuschristi:Corpus Christi 07/09:Independência do Brasil 12/10:Nossa Sra. Aparecida 02/11:Finados 15/11:Proclamação da República 25/12:Natal $ZZFERIADO"
 
 	# Verifica se lista ou nao, caso negativo verifica se a data escolhida é feriado
 	if test "$listar" = "1"; then
@@ -7738,11 +8135,11 @@ zzfoneletra ()
 #      zzfrenteverso2pdf -rf
 #      zzfrenteverso2pdf -rv -d "/tmp/dir_teste"
 #
-# Autor: Lauro Cavalcanti de Sa <lauro (a) ecdesa com>
+# Autor: Lauro Cavalcanti de Sa <laurocdesa (a) gmail com>
 # Desde: 2009-09-17
-# Versão: 3
+# Versão: 4
 # Licença: GPLv2
-# Requisitos: pdftk
+# Nota: requer pdftk
 # ----------------------------------------------------------------------------
 zzfrenteverso2pdf ()
 {
@@ -7775,6 +8172,7 @@ zzfrenteverso2pdf ()
 			-v | --verbose)
 				set -x
 				;;
+			--) shift; break ;;
 			*) { zztool -e uso frenteverso2pdf; set +x; return 1; } ;;
 		esac
 		shift
@@ -7784,6 +8182,12 @@ zzfrenteverso2pdf ()
 	if test ! -s "$dir/$arq_frentes" -o ! -s "$dir/$arq_versos" ; then
 		zztool erro "ERRO: Um dos arquivos $dir/$arq_frentes ou $dir/$arq_versos nao existe!"
 		return 1
+	fi
+
+	# Verifica se pdftk existe.
+	if ! [ -x "$(command -v pdftk)" ]; then
+		zztool erro "ERRO: pdftk nao esta instalado!"
+		return 2
 	fi
 
 	# Determina o numero de paginas de cada arquivo.
@@ -7833,6 +8237,8 @@ zzfrenteverso2pdf ()
 # Ou um ou dois argumentos para ver resultados do jogos:
 #   resultado ou placar, que pode ser acompanhado de hoje, ontem, anteontem.
 #
+# Nos casos dos dias, podem ser usadas datas no formato DD/MM/AAAA.
+#
 # Um filtro com nome do campeonato, nome do time, ou horário de uma partida.
 #
 # Uso: zzfutebol [resultado | placar ] [ argumento ]
@@ -7847,48 +8253,41 @@ zzfrenteverso2pdf ()
 #
 # Autor: Jefferson Fausto Vaz (www.faustovaz.com)
 # Desde: 2014-04-08
-# Versão: 8
+# Versão: 10
 # Licença: GPL
-# Requisitos: zzdata zzdatafmt zztrim zzpad
+# Requisitos: zzcut zzdatafmt zzjuntalinhas zzpad zztrim zzxml
 # ----------------------------------------------------------------------------
 zzfutebol ()
 {
 
 	zzzz -h futebol "$1" && return
-	local url="http://esporte.uol.com.br/futebol/central-de-jogos/proximos-jogos"
+	local url="http://esporte.uol.com.br/futebol/central-de-jogos"
+	local pagina='proximos-jogos'
 	local linha campeonato time1 time2
 
 	case "$1" in
-		resultado | placar) url="http://esporte.uol.com.br/futebol/central-de-jogos/resultados"; shift;;
-		ontem | anteontem)  url="http://esporte.uol.com.br/futebol/central-de-jogos/resultados";;
+		resultado | placar) pagina='resultados'; shift;;
+		ontem | anteontem)  pagina='resultados';;
 	esac
 
-	$ZZWWWDUMP "$url" |
-	sed -n '/[0-9]h[0-9]/{N;N;p;}' |
-	sed '
-		s/[A-Z][A-Z][A-Z] //
-		s/__*//
-		/º / { s/.*\([0-9]\{1,\}º\)/\1/ }' |
+	zztool source "${url}/${pagina}" |
+	zzxml --tidy |
+	zzjuntalinhas -i 'td class="league"' -f '</td>' |
+	if test "$pagina" = 'proximos-jogos'
+	then
+		sed -n '/class="league"/p;/<span class="\(data\|hora\)">/,/<\/span>/p;;/<meta itemprop="\(name\|location\)"/{/content=""/d;s/">//;s/.*"//;p;}'
+	else
+		sed -n '/class="league"/p;/<span class="\(data\|hora\)">/,/<\/span>/p;/abbr title=/{s/">//;s/.*"//;p;};/<label class="gols">/,/label>/p'
+	fi |
+	zzxml --untag |
 	zztrim |
-	awk '
-		NR % 3 == 1 { campeonato = $0 }
-		NR % 3 == 2 { time1 = $0; if ($(NF-1) ~ /^[0-9]{1,}$/) { penais1=$(NF -1)} else {penais1=""} }
-		NR % 3 == 0 {
-			if ($NF ~ /^[0-9]{1,}$/) { reserva=$NF " "; $NF=""; } else { reserva="" }
-			if ($(NF-1) ~ /^[0-9]{1,}$/ ) { penais2=$(NF -1)} else {penais2=""}
-			if (length(penais1)>0 && length(penais2)>0) {
-				sub(" " penais1, "", time1)
-				sub(" " penais2, "")
-				penais1 = " ( " penais1
-				penais2 = penais2 " ) "
-			}
-			else {penais1="";penais2=""}
-			print campeonato ":" time1 penais1 ":" penais2 reserva $0
-		}
-		' |
+	awk -v pag="$pagina" '
+		BEGIN { lim = (pag=="resultados"?7:4) }
+		/[0-3][0-9]\// {printf $0; for(i=1;i<lim;i++){getline;printf ":" $0};print ""}
+	' |
 	case "$1" in
-		hoje | amanh[aã] | segunda | ter[cç]a | quarta | quinta | sexta | s[aá]bado | domingo | ontem | anteontem)
-			grep --color=never -e $( zzdata $1 | zzdatafmt -f 'DD/MM/AA' )
+		hoje | amanh[aã] | segunda | ter[cç]a | quarta | quinta | sexta | s[aá]bado | domingo | ontem | anteontem | [0-3][0-9]/[01][0-9]/20[1-9][0-9])
+			grep --color=never -e $(zzdatafmt -f 'DD/MM/AA' $1)
 			;;
 		*)
 			grep --color=never -i "${1:-.}"
@@ -7896,10 +8295,16 @@ zzfutebol ()
 	esac |
 	while read linha
 	do
-		campeonato=$(echo $linha | cut -d":" -f 1)
-		time1=$(echo $linha | cut -d":" -f 2)
-		time2=$(echo $linha | cut -d":" -f 3 | zztrim)
-		echo "$(zzpad -r 40 $campeonato) $(zzpad -l 25 $time1) x $time2"
+		campeonato=$(echo $linha | zzcut -d : -D ' ' -f1-3)
+		if test "$pagina" = 'proximos-jogos'
+		then
+			time1=$(echo $linha | zzcut -d : -f 4 | zzcut -d ' x ' -f 1)
+			time2=$(echo $linha | zzcut -d : -f 4 | zzcut -d ' x ' -f 2)
+		else
+			time1=$(echo $linha | zzcut -d : -f 5,4 -D ' ')
+			time2=$(echo $linha | zzcut -d : -f 6,7 -D ' ')
+		fi
+		echo "$(zzpad -r 45 $campeonato) $(zzpad -l 25 $time1) x $time2"
 	done
 }
 
@@ -7914,7 +8319,7 @@ zzfutebol ()
 # Desde: 2013-07-06
 # Versão: 3
 # Licença: GPLv2
-# Requisitos: zzxml zzipinternet zzecho zzminiurl
+# Requisitos: zzxml zzipinternet zzecho zzminiurl zztestar
 # ----------------------------------------------------------------------------
 zzgeoip ()
 {
@@ -7929,7 +8334,7 @@ zzgeoip ()
 		return 1
 	elif test -n "$1"
 	then
-		zztool -e testa_ip "$1"
+		zztestar -e ip "$1"
 		test $? -ne 0 && zztool -e uso geoip && return 1
 		ip="$1"
 	else
@@ -7937,14 +8342,14 @@ zzgeoip ()
 	fi
 
 	pagina=$(
-		$ZZWWWHTML http://geoip.s12.com.br?ip=$ip |
+		zztool source http://geoip.s12.com.br?ip=$ip |
 			zzxml --tidy --untag --tag td |
 			sed '/^[[:blank:]]*$/d;/&/d' |
 			awk '{if ($0 ~ /:/) { printf "\n%s",$0 } else printf $0}'
 	)
 
 	cidade=$(   echo "$pagina" | grep 'Cidade:'    | cut -d : -f 2         )
- 	uf=$(       echo "$pagina" | grep 'Estado:'    | cut -d : -f 2         )
+	uf=$(       echo "$pagina" | grep 'Estado:'    | cut -d : -f 2         )
 	pais=$(     echo "$pagina" | grep 'País:'      | cut -d : -f 2         )
 	latitude=$( echo "$pagina" | grep 'Latitude:'  | cut -d : -f 2 | tr , .)
 	longitude=$(echo "$pagina" | grep 'Longitude:' | cut -d : -f 2 | tr , .)
@@ -7967,99 +8372,29 @@ zzgeoip ()
 # Ex.: zzglobo
 #
 # Autor: Vinícius Venâncio Leite <vv.leite (a) gmail com>
-# Desde: 2007-11-30
-# Versão: 5
+# Desde: 2017-11-29
+# Versão: 8
 # Licença: GPL
 # Requisitos: zztrim
 # ----------------------------------------------------------------------------
 zzglobo ()
 {
-	zzzz -h globo "$1" && return
+		zzzz -h globo "$1" && return
 
-	local url="http://vejonatv.com.br/programacao/globo-rede.html"
+		local url="http://redeglobo.globo.com/programacao.html"
 
-	$ZZWWWDUMP "$url" |
-		sed -n "/Hoje \[[0-9]*\-[0-9]*\-[0-9]*\]/,/Amanhã .*/p" |
-		sed '$d' |
-		uniq |
-		zztrim
-}
-
-# ----------------------------------------------------------------------------
-# zzgoogle
-# http://google.com
-# Pesquisa no Google diretamente pela linha de comando.
-# Uso: zzgoogle [-n <número>] palavra(s)
-# Ex.: zzgoogle receita de bolo de abacaxi
-#      zzgoogle -n 5 ramones papel higiênico cachorro
-#
-# Autor: Aurelio Marinho Jargas, www.aurelio.net
-# Desde: 2003-04-03
-# Versão: 2
-# Licença: GPL
-# ----------------------------------------------------------------------------
-# FIXME: zzgoogle rato roeu roupa rei roma [PPS], [PDF]
-zzgoogle ()
-{
-	zzzz -h google "$1" && return
-
-	local padrao
-	local limite=10
-	local url='http://www.google.com.br/search'
-
-	# Opções de linha de comando
-	if test "$1" = '-n'
-	then
-		limite="$2"
-		shift
-		shift
-
-		zztool -e testa_numero "$limite" || return 1
-	fi
-
-	# Verificação dos parâmetros
-	test -n "$1" || { zztool -e uso google; return 1; }
-
-	# Prepara o texto a ser pesquisado
-	padrao=$(echo "$*" | sed "$ZZSEDURL")
-	test -n "$padrao" || return 0
-
-	# Pesquisa, baixa os resultados e filtra
-	#
-	# O Google condensa tudo em um única longa linha, então primeiro é preciso
-	# inserir quebras de linha antes de cada resultado. Identificadas as linhas
-	# corretas, o filtro limpa os lixos e formata o resultado.
-
-	$ZZWWWHTML -cookies "$url?q=$padrao&num=$limite&ie=UTF-8&oe=UTF-8&hl=pt-BR" |
-		sed 's/<p>/\
-@/g' |
-		sed '
-			/^@<a href="\([^"]*\)">/!d
-			s|^@<a href="/url?q=||
-			s/<\/a>.*//
-
-			s/<table.*//
-			/^http/!d
-			s/&amp;sa.*">/ /
-
-			# Remove tags HTML
-			s/<[^>]*>//g
-
-			# Restaura os caracteres especiais
-			s/&gt;/>/g
-			s/&lt;/</g
-			s/&quot;/"/g
-			s/&nbsp;/ /g
-			s/&amp;/\&/g
-
-			# Restaura caracteres url encoded
-			s/%3F/?/g
-			s/%3D/\=/g
-			s/%26/\&/g
-
-			s/\([^ ]*\) \(.*\)/\2\
-  \1\
-/'
+		zztool dump -i utf-8 "$url" |
+				sed '/^$/d' |
+				sed -n '/\(Seg\|Ter\|Qua\|Qui\|Sex\|Sab\|Dom\),/p' |
+				zztrim
+		echo
+		zztool dump -i utf-8 "$url" |
+				sed '/^$/d' |
+				sed 'H;/[0-9][0-9]:[0-9][0-9]/{g;N;s/^\n//p;}; x;s/.*\(\(\n[^\n]*\)\{1\}\)/\1/;x ;d' |
+				sed '/No ar/d' |
+				sed 's/ *\([0-9][0-9]:[0-9][0-9]\)/\1\:/' |
+				sed 'N;s/:\n/: /' |
+				zztrim
 }
 
 # ----------------------------------------------------------------------------
@@ -8178,42 +8513,6 @@ zzgravatar ()
 }
 
 # ----------------------------------------------------------------------------
-# zzhastebin
-# http://hastebin.com/
-# Gera link para arquivos de texto em geral.
-#
-# Uso: zzhastebin [arquivo]
-# Ex.: zzhastebin helloworld.sh
-#
-# Autor: Jones Dias <diasjones07 (a) gmail.com>
-# Desde: 2015-02-12
-# Versão: 1
-# Licença: GPL
-# ----------------------------------------------------------------------------
-zzhastebin ()
-{
-
-	zzzz -h hastebin "$1" && return
-
-	local hst="http://hastebin.com/"
-	local uri
-	local ext=$(basename $1 | cut -d\. -f2)
-
-	# Verifica o parametro da função
-	if ! zztool arquivo_legivel "$1"
-	then
-		zztool -e uso hastebin
-		return 1
-	fi
-
-	# Retorna o ID
-	uri="$(curl -s --data-binary @$1 ${hst}documents | cut -d\" -f 4)"
-
-	# Imprime link
-	echo "$hst$uri.$ext"
-}
-
-# ----------------------------------------------------------------------------
 # zzhexa2str
 # Converte os bytes em hexadecimal para a string equivalente.
 # Uso: zzhexa2str [bytes]
@@ -8252,6 +8551,209 @@ zzhexa2str ()
 }
 
 # ----------------------------------------------------------------------------
+# zzhoracerta
+# http://www.worldtimeserver.com
+# Mostra a hora certa de um determinado local.
+# Se nenhum parâmetro for passado, são listados as localidades disponíveis.
+# O parâmetro pode ser tanto a sigla quando o nome da localidade.
+# A opção -s realiza a busca somente na sigla.
+# Uso: zzhoracerta [-s] local
+# Ex.: zzhoracerta rio grande do sul
+#      zzhoracerta -s br
+#      zzhoracerta rio
+#      zzhoracerta us-ny
+#
+# Autor: Thobias Salazar Trevisan, www.thobias.org
+# Desde: 2004-03-29
+# Versão: 4
+# Licença: GPL
+# ----------------------------------------------------------------------------
+zzhoracerta ()
+{
+	zzzz -h horacerta "$1" && return
+
+	local codigo localidade localidades
+	local cache=$(zztool cache horacerta)
+	local url='http://www.worldtimeserver.com'
+
+	# Opções de linha de comando
+	if test "$1" = '-s'
+	then
+		shift
+		codigo="$1"
+	else
+		localidade="$*"
+	fi
+
+	# Se o cache está vazio, baixa listagem da Internet
+	# De: <li><a href="current_time_in_AR-JY.aspx">Jujuy</a></li>
+	# Para: AR-JY -- Jujuy
+	if ! test -s "$cache"
+	then
+		zztool source "$url/country.html" |
+			grep 'current_time_in_' |
+			sed 's/.*_time_in_// ; s/\.aspx">/ -- / ; s/<.*//' > "$cache"
+	fi
+
+	# Se nenhum parâmetro for passado, são listados os países disponíveis
+	if ! test -n "$localidade$codigo"
+	then
+		cat "$cache"
+		return
+	fi
+
+	# Faz a pesquisa por codigo ou texto
+	if test -n "$codigo"
+	then
+		localidades=$(grep -i "^[^ ]*$codigo" "$cache")
+	else
+		localidades=$(grep -i "$localidade" "$cache")
+	fi
+
+	# Se mais de uma localidade for encontrada, mostre-as
+	if test $(echo "$localidades" | zztool num_linhas) != 1
+	then
+		echo "$localidades"
+		return
+	fi
+
+	# A localidade existe?
+	if ! test -n "$localidades"
+	then
+		zztool erro "Localidade \"$localidade$codigo\" não encontrada"
+		return 1
+	fi
+
+	# Grava o código da localidade (BR-RS -- Rio Grande do Sul -> BR-RS)
+	localidade=$(echo "$localidades" | sed 's/ .*//')
+
+	# Faz a consulta e filtra o resultado
+	zztool dump "$url/current_time_in_$localidade.aspx" |
+		sed -n '/Current Time in /,/Daylight Saving Time:/{
+			s/Current Time in //
+			/[?:]$/d
+			/^ *$/d
+			s/^ *//
+			p
+		}'
+}
+
+# ----------------------------------------------------------------------------
+# zzhoramin
+# Converte horas em minutos.
+# Obs.: Se não informada a hora, usa o horário atual para o cálculo.
+# Uso: zzhoramin [hh:mm]
+# Ex.: zzhoramin
+#      zzhoramin 10:53       # Retorna 653
+#      zzhoramin -10:53      # Retorna -653
+#
+# Autor: Marcell S. Martini <marcellmartini (a) gmail com>
+# Desde: 2008-12-05
+# Versão: 4
+# Licença: GPLv2
+# Requisitos: zzhora zztestar
+# ----------------------------------------------------------------------------
+zzhoramin ()
+{
+
+	zzzz -h horamin "$1" && return
+
+	local mintotal hh mm hora operacao
+
+	operacao='+'
+
+	# Testa se o parâmetro passado é uma hora valida
+	if ! zztestar hora "${1#-}"; then
+		hora=$(zzhora agora | cut -d ' ' -f 1)
+	else
+		hora="$1"
+	fi
+
+	# Verifica se a hora é positiva ou negativa
+	if test "${hora#-}" != "$hora"; then
+		operacao='-'
+	fi
+
+	# passa a hora para hh e minuto para mm
+	hh="${hora%%:*}"
+	mm="${hora##*:}"
+
+	# Retira o zero das horas e minutos menores que 10
+	hh="${hh#0}"
+	mm="${mm#0}"
+
+	# Se tiver algo faltando, salva como zero
+	hh="${hh:-0}"
+	mm="${mm:-0}"
+
+	# faz o cálculo
+	mintotal=$(($hh * 60 $operacao $mm))
+
+	# Tcharã!!!!
+	echo "$mintotal"
+}
+
+# ----------------------------------------------------------------------------
+# zzhorariodeverao
+# Mostra as datas de início e fim do horário de verão.
+# Obs.: Ano de 2008 em diante. Se o ano não for informado, usa o atual.
+# Regra: 3º domingo de outubro/fevereiro, exceto carnaval (4º domingo).
+# Uso: zzhorariodeverao [ano]
+# Ex.: zzhorariodeverao
+#      zzhorariodeverao 2009
+#
+# Autor: Aurelio Marinho Jargas, www.aurelio.net
+# Desde: 2008-10-24
+# Versão: 1
+# Licença: GPL
+# Requisitos: zzcarnaval zzdata zzdiadasemana
+# Tags: data
+# ----------------------------------------------------------------------------
+zzhorariodeverao ()
+{
+	zzzz -h horariodeverao "$1" && return
+
+	local inicio fim data domingo_carnaval
+	local dias_3a_semana="15 16 17 18 19 20 21"
+	local ano="$1"
+
+	# Se o ano não for informado, usa o atual
+	test -z "$ano" && ano=$(date +%Y)
+
+	# Validação
+	zztool -e testa_ano "$ano" || return 1
+
+	# Só de 2008 em diante...
+	if test "$ano" -lt 2008
+	then
+		zztool erro 'Antes de 2008 não havia regra fixa para o horário de verão'
+		return 1
+	fi
+
+	# Encontra os dias de início e término do horário de verão.
+	# Sei que o algoritmo não é eficiente, mas é simples de entender.
+	#
+	for dia in $dias_3a_semana
+	do
+		data="$dia/10/$ano"
+		test $(zzdiadasemana $data) = 'domingo' && inicio="$data"
+
+		data="$dia/02/$((ano+1))"
+		test $(zzdiadasemana $data) = 'domingo' && fim="$data"
+	done
+
+	# Exceção à regra: Se o domingo de término do horário de verão
+	# coincidir com o Carnaval, adia o término para o próximo domingo.
+	#
+	domingo_carnaval=$(zzdata $(zzcarnaval $((ano+1)) ) - 2)
+	test "$fim" = "$domingo_carnaval" && fim=$(zzdata $fim + 7)
+
+	# Datas calculadas, basta mostrar o resultado
+	echo "$inicio"
+	echo "$fim"
+}
+
+# ----------------------------------------------------------------------------
 # zzhora
 # Faz cálculos com horários.
 # A opção -r torna o cálculo relativo à primeira data, por exemplo:
@@ -8268,7 +8770,7 @@ zzhexa2str ()
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2000-02-22
-# Versão: 4
+# Versão: 5
 # Licença: GPL
 # ----------------------------------------------------------------------------
 zzhora ()
@@ -8452,7 +8954,7 @@ zzhora ()
 	#   10:00 (2 dias)                       23:00 (ontem)
 	#
 	# Normal:
-	#   $ zzhora 10:00 + 48:00               $ zzhora -r 12:00 - 13:00
+	#   $ zzhora 10:00 + 48:00               $ zzhora 12:00 - 13:00
 	#   58:00 (2d 10h 0m)                    -01:00 (0d 1h 0m)
 	#
 	if test $relativo -eq 1
@@ -8466,7 +8968,7 @@ zzhora ()
 		then
 			# Para o resultado negativo é preciso refazer algumas contas
 			minutos=$(( (60-minutos) % 60))
-			dias=$((horas/24 + (minutos>0) ))
+			dias=$((horas/24))
 			hh_dia=$(( (24 - horas_do_dia - (minutos>0)) % 24))
 			mm="$minutos"
 
@@ -8481,9 +8983,12 @@ zzhora ()
 				extra='amanhã'
 			;;
 			-1)
+				test ${horas_do_dia} -ne 0 -o ${minutos} -ne 0 && extra='anteontem' || extra='ontem'
+			;;
+			-0)
 				extra='ontem'
 			;;
-			0 | -0)
+			0)
 				extra='hoje'
 			;;
 			*)
@@ -8501,200 +9006,61 @@ zzhora ()
 }
 
 # ----------------------------------------------------------------------------
-# zzhoracerta
-# http://www.worldtimeserver.com
-# Mostra a hora certa de um determinado local.
-# Se nenhum parâmetro for passado, são listados as localidades disponíveis.
-# O parâmetro pode ser tanto a sigla quando o nome da localidade.
-# A opção -s realiza a busca somente na sigla.
-# Uso: zzhoracerta [-s] local
-# Ex.: zzhoracerta rio grande do sul
-#      zzhoracerta -s br
-#      zzhoracerta rio
-#      zzhoracerta us-ny
+# zzhoroscopo
+# http://m.horoscopovirtual.bol.uol.com.br/horoscopo/
+# Consulta o horóscopo do dia.
+# Deve ser informado o signo que se deseja obter a previsão.
 #
-# Autor: Thobias Salazar Trevisan, www.thobias.org
-# Desde: 2004-03-29
-# Versão: 2
-# Licença: GPL
-# ----------------------------------------------------------------------------
-zzhoracerta ()
-{
-	zzzz -h horacerta "$1" && return
-
-	local codigo localidade localidades
-	local cache=$(zztool cache horacerta)
-	local url='http://www.worldtimeserver.com'
-
-	# Opções de linha de comando
-	if test "$1" = '-s'
-	then
-		shift
-		codigo="$1"
-	else
-		localidade="$*"
-	fi
-
-	# Se o cache está vazio, baixa listagem da Internet
-	# De: <li><a href="current_time_in_AR-JY.aspx">Jujuy</a></li>
-	# Para: AR-JY -- Jujuy
-	if ! test -s "$cache"
-	then
-		$ZZWWWHTML "$url/country.html" |
-			grep 'current_time_in_' |
-			sed 's/.*_time_in_// ; s/\.aspx">/ -- / ; s/<.*//' > "$cache"
-	fi
-
-	# Se nenhum parâmetro for passado, são listados os países disponíveis
-	if ! test -n "$localidade$codigo"
-	then
-		cat "$cache"
-		return
-	fi
-
-	# Faz a pesquisa por codigo ou texto
-	if test -n "$codigo"
-	then
-		localidades=$(grep -i "^[^ ]*$codigo" "$cache")
-	else
-		localidades=$(grep -i "$localidade" "$cache")
-	fi
-
-	# Se mais de uma localidade for encontrada, mostre-as
-	if test $(echo "$localidades" | sed -n '$=') != 1
-	then
-		echo "$localidades"
-		return
-	fi
-
-	# A localidade existe?
-	if ! test -n "$localidades"
-	then
-		zztool erro "Localidade \"$localidade$codigo\" não encontrada"
-		return 1
-	fi
-
-	# Grava o código da localidade (BR-RS -- Rio Grande do Sul -> BR-RS)
-	localidade=$(echo "$localidades" | sed 's/ .*//')
-
-	# Faz a consulta e filtra o resultado
-	$ZZWWWDUMP "$url/current_time_in_$localidade.aspx" |
-		grep 'The current time' -B 2 -A 5
-}
-
-# ----------------------------------------------------------------------------
-# zzhoramin
-# Converte horas em minutos.
-# Obs.: Se não informada a hora, usa o horário atual para o cálculo.
-# Uso: zzhoramin [hh:mm]
-# Ex.: zzhoramin
-#      zzhoramin 10:53       # Retorna 653
-#      zzhoramin -10:53      # Retorna -653
+# Signos: aquário, peixes, áries, touro, gêmeos, câncer, leão,
+#         virgem, libra, escorpião, sagitário, capricórnio
 #
-# Autor: Marcell S. Martini <marcellmartini (a) gmail com>
-# Desde: 2008-12-05
-# Versão: 4
-# Licença: GPLv2
-# Requisitos: zzhora
-# ----------------------------------------------------------------------------
-zzhoramin ()
-{
-
-	zzzz -h horamin "$1" && return
-
-	local mintotal hh mm hora operacao
-
-	operacao='+'
-
-	# Testa se o parâmetro passado é uma hora valida
-	if ! zztool testa_hora "${1#-}"; then
-		hora=$(zzhora agora | cut -d ' ' -f 1)
-	else
-		hora="$1"
-	fi
-
-	# Verifica se a hora é positiva ou negativa
-	if test "${hora#-}" != "$hora"; then
-		operacao='-'
-	fi
-
-	# passa a hora para hh e minuto para mm
-	hh="${hora%%:*}"
-	mm="${hora##*:}"
-
-	# Retira o zero das horas e minutos menores que 10
-	hh="${hh#0}"
-	mm="${mm#0}"
-
-	# Se tiver algo faltando, salva como zero
-	hh="${hh:-0}"
-	mm="${mm:-0}"
-
-	# faz o cálculo
-	mintotal=$(($hh * 60 $operacao $mm))
-
-	# Tcharã!!!!
-	echo "$mintotal"
-}
-
-# ----------------------------------------------------------------------------
-# zzhorariodeverao
-# Mostra as datas de início e fim do horário de verão.
-# Obs.: Ano de 2008 em diante. Se o ano não for informado, usa o atual.
-# Regra: 3º domingo de outubro/fevereiro, exceto carnaval (4º domingo).
-# Uso: zzhorariodeverao [ano]
-# Ex.: zzhorariodeverao
-#      zzhorariodeverao 2009
+# Uso: zzhoroscopo <signo>
+# Ex.: zzhoroscopo sagitário    # exibe a previsão para o signo de sagitário
 #
-# Autor: Aurelio Marinho Jargas, www.aurelio.net
-# Desde: 2008-10-24
+# Autor: Juliano Fernandes, http://julianofernandes.com.br
+# Desde: 2016-05-07
 # Versão: 1
 # Licença: GPL
-# Requisitos: zzcarnaval zzdata zzdiadasemana
-# Tags: data
+# Requisitos: zzsemacento zzminusculas zzxml
 # ----------------------------------------------------------------------------
-zzhorariodeverao ()
+zzhoroscopo ()
 {
-	zzzz -h horariodeverao "$1" && return
+	zzzz -h horoscopo "$1" && return
 
-	local inicio fim data domingo_carnaval
-	local dias_3a_semana="15 16 17 18 19 20 21"
-	local ano="$1"
-
-	# Se o ano não for informado, usa o atual
-	test -z "$ano" && ano=$(date +%Y)
-
-	# Validação
-	zztool -e testa_ano "$ano" || return 1
-
-	# Só de 2008 em diante...
-	if test "$ano" -lt 2008
+	# Verifica se o usuário informou um possível signo
+	if test -z "$1"
 	then
-		zztool erro 'Antes de 2008 não havia regra fixa para o horário de verão'
+		zztool -e uso horoscopo
 		return 1
 	fi
 
-	# Encontra os dias de início e término do horário de verão.
-	# Sei que o algoritmo não é eficiente, mas é simples de entender.
-	#
-	for dia in $dias_3a_semana
-	do
-		data="$dia/10/$ano"
-		test $(zzdiadasemana $data) = 'domingo' && inicio="$data"
+	# Normaliza o signo para pacilitar sua busca
+	local signo=$(zzsemacento "$1" | zzminusculas)
 
-		data="$dia/02/$((ano+1))"
-		test $(zzdiadasemana $data) = 'domingo' && fim="$data"
-	done
+	# Lista de signos válidos
+	local signos='aquario peixes aries touro gemeos cancer leao virgem libra escorpiao sagitario capricornio'
 
-	# Exceção à regra: Se o domingo de término do horário de verão
-	# coincidir com o Carnaval, adia o término para o próximo domingo.
-	#
-	domingo_carnaval=$(zzdata $(zzcarnaval $((ano+1)) ) - 2)
-	test "$fim" = "$domingo_carnaval" && fim=$(zzdata $fim + 7)
+	# Se o signo informado pelo usuário for válido faz a consulta ao serviço
+	if zztool grep_var $signo "$signos"
+	then
+		# Define as regras para remover tudo que não se refere ao signo desejado
+		local remove_ini='s/^<article><p>//'
+		local remove_fim='s/<\/p><\/article>.*$//'
 
-	# Datas calculadas, basta mostrar o resultado
-	echo "$inicio"
-	echo "$fim"
+		# Endereço do serviço de consulta do horóscopo
+		local url="http://m.horoscopovirtual.bol.uol.com.br/horoscopo/$signo"
+
+		# Faz a mágica acontecer
+		zztool source -u 'Mozilla/5.0' "$url" |
+			zzxml --tag 'article' |
+			tr -ds '\t\n\r' ' ' |
+			sed "$remove_ini;$remove_fim" |
+			zzxml --untag |
+			zztool nl_eof |
+			awk '{sub(/$/,"\n",$2);gsub(/\. /,".\n ")};1'
+	else
+		return 1
+	fi
 }
 
 # ----------------------------------------------------------------------------
@@ -8707,8 +9073,9 @@ zzhorariodeverao ()
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2002-08-27
-# Versão: 2
+# Versão: 3
 # Licença: GPL
+# Requisitos: zztrim zzxml
 # ----------------------------------------------------------------------------
 zzhowto ()
 {
@@ -8733,9 +9100,11 @@ zzhowto ()
 	# Se o cache está vazio, baixa listagem da Internet
 	if ! test -s "$cache"
 	then
-		$ZZWWWDUMP "$url" |
-			grep 'text/html' |
-			sed 's/^  *//; s/ [0-9][0-9]:.*//' > "$cache"
+		zztool source "$url" |
+			zzxml --untag |
+			zztrim |
+			fgrep '.html' |
+			sed 's/ [0-9][0-9]:.*//' > "$cache"
 	fi
 
 	# Pesquisa o termo (se especificado)
@@ -8747,10 +9116,139 @@ zzhowto ()
 }
 
 # ----------------------------------------------------------------------------
+# zzhsort
+# Ordenar palavras ou números horizontalmente.
+# Opções:
+#   -r                              define o sentido da ordenação reversa.
+#   -d <sep>                        define o separador de campos na entrada.
+#   -D, --output-delimiter <sep>  define o separador de campos na saída.
+#
+# O separador na entrada pode ser 1 ou mais caracteres ou uma ER.
+# Se não for declarado assume-se espaços em branco como separador.
+# Conforme padrão do awk, o default seria FS = "[ \t]+".
+#
+# Se o separador de saída não for declarado, assume o mesmo da entrada.
+# Caso a entrada também não seja declarada assume-se como um espaço.
+# Conforme padrão do awk, o default é OFS = " ".
+#
+# Se o separador da entrada é uma ER, é bom declarar o separador de saída.
+#
+# Uso: zzhsort [-d <sep>] [-D | --output-delimiter <sep>] <Texto>
+# Ex.: zzhsort "isso está desordenado"            # desordenado está isso
+#      zzhsort -r -d ":" -D "-" "1:a:z:x:5:o"  # z-x-o-a-5-1
+#      cat num.txt | zzhsort -d '[\t:]' --output-delimiter '\t'
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2015-10-07
+# Versão: 2
+# Licença: GPL
+# Requisitos: zztranspor
+# ----------------------------------------------------------------------------
+zzhsort ()
+{
+	zzzz -h hsort "$1" && return
+
+	local sep ofs direcao
+
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+			-d)
+			# Separador de campos na entrada
+				sep="-d $2"
+				shift
+				shift
+			;;
+			-D | --output-delimiter)
+			# Separador de campos na saída
+				ofs="-D $2"
+				shift
+				shift
+			;;
+			-r)
+			# Ordenar decrescente
+				direcao="-r"
+				shift
+			;;
+			--) shift; break;;
+			-*) zztool -e uso hsort; return 1;;
+			*) break;;
+		esac
+	done
+
+	zztool multi_stdin "$@" |
+	while read linha
+	do
+		if test -z "$linha"
+		then
+			echo
+		else
+			echo "$linha" |
+			zztranspor $sep |
+			sort -n $direcao |
+			zztranspor $sep $ofs
+		fi
+	done
+}
+
+# ----------------------------------------------------------------------------
+# zzimc
+# Calcula o valor do IMC correspodente a sua estrutura corporal.
+#
+# Uso: zzimc <peso_em_KG> <altura_em_metros>
+# Ex.: zzimc 108.5 1.73
+#
+# Autor: Rafael Araújo <rafaelaraujosilva (a) gmail com>
+# Desde: 2015-10-30
+# Versão: 1
+# Licença: GPL
+# Requisitos: zztestar
+# ----------------------------------------------------------------------------
+zzimc ()
+{
+
+	zzzz -h imc "$1" && return
+
+	# Verificação dos parâmetros
+	test -n "$1" || { zztool -e uso imc; return 1; }
+	test -n "$2" || { zztool -e uso imc; return 1; }
+
+	local PESO=`echo "$1" | tr "," "."`
+	local ALTURA=`echo "$2" | tr "," "."`
+
+	if ! ( zztestar numero_real "$PESO" )
+	then
+
+		zztool erro "Valor inserido para o peso está inválido, favor verificar!"
+		return 1
+	fi
+
+	if ! ( zztestar numero_real "$ALTURA" )
+	then
+
+		zztool erro "Valor inserido para a altura está inválido, favor verificar!"
+		return 1
+	fi
+
+	echo "scale=2;$PESO / ( $ALTURA^2 )" | bc |
+	awk '{
+		if ($1 >= 40 ) {print "IMC: "$1" - OBESIDADE GRAU III"}
+		if ($1 < 40 && $1 >= 35) {print "IMC: "$1" - OBESIDADE GRAU II"}
+		if ($1 < 35 && $1 >= 30) {print "IMC: "$1" - OBESIDADE GRAU I"}
+		if ($1 < 30 && $1 >= 25) {print "IMC: "$1" - PRE-OBESIDADE"}
+		if ($1 < 25 && $1 >= 18.5) {print "IMC: "$1" - PESO ADEQUADO"}
+		if ($1 < 18.5 && $1 >= 17) {print "IMC: "$1" - MAGREZA GRAU I"}
+		if ($1 < 17 && $1 >= 16) {print "IMC: "$1" - MAGREZA GRAU II"}
+		if ($1 < 16 ) {print "IMC: "$1" - MAGREZA GRAU III"}
+	}'
+}
+
+# ----------------------------------------------------------------------------
 # zziostat
 # Monitora a utilização dos discos no Linux.
 #
 # Opções:
+#   -n [número]    Quantidade de medições (padrão = 10; contínuo = 0)
 #   -t [número]    Mostra apenas os discos mais utilizados
 #   -i [segundos]  Intervalo em segundos entre as coletas
 #   -d [discos]    Mostra apenas os discos que começam com a string passada
@@ -8766,72 +9264,99 @@ zzhowto ()
 #
 # Uso: zziostat [-t número] [-i segundos] [-d discos] [-o trwT]
 # Ex.: zziostat
+#      zziostat -n 15
 #      zziostat -t 10
 #      zziostat -i 5 -o T
 #      zziostat -d emcpower
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2015-02-17
-# Versão: 1
+# Versão: 2
 # Licença: GPL
-# Requisitos: iostat
+# Nota: requer iostat
 # ----------------------------------------------------------------------------
 zziostat ()
 {
 	zzzz -h iostat "$1" && return
 
+	which iostat 1>/dev/null 2>&1 || { zztool erro "iostat não instalado"; return 1; }
+
 	local top line cycle tps reads writes totals
 	local delay=2
 	local orderby='t'
 	local disk='sd'
+	local iteration=10
+	local i=0
 
 	# Opcoes de linha de comando
-	while [ "${1#-}" != "$1" ]
+	while test "${1#-}" != "$1"
 	do
 		case "$1" in
+			-n )
+				shift
+				iteration=$1
+				zztool -e testa_numero $iteration || return 1
+				test $iteration -eq 0 && unset iteration
+				;;
 			-t )
-				shift; top=$1
-				zztool testa_numero $top || { echo "Número inválido $top"; return 1; }
+				shift
+				top=$1
+				zztool -e testa_numero $top || return 1
 				;;
 			-i )
-				shift; delay=$1
-				zztool testa_numero $delay || { echo "Número inválido $delay"; return 1; }
+				shift
+				delay=$1
+				zztool -e testa_numero $delay || return 1
 				;;
 			-d )
-				shift; disk=$1
+				shift
+				disk=$1
 				;;
 			-o )
-				shift; orderby=$1
-				if ! echo $orderby | grep -qs '^[rwtT]$'; then
-					echo "Opção inválida '$orderby'"
+				shift
+				orderby=$1
+				if ! echo $orderby | grep -qs '^[rwtT]$'
+				then
+					zztool erro "Opção inválida '$orderby'"
 					return 1
 				fi
 				;;
-			 * )
-				echo "Opção inválida $1"; return 1;;
+			* )
+				zztool erro "Opção inválida $1"; return 1;;
 		esac
 		shift
 	done
 
 	# Coluna para ordenacao:
 	# Device tps MB_read/s MB_wrtn/s MB_read MB_wrtn MB_total/s
-	[ "$orderby" = "t" ] && orderby=2
-	[ "$orderby" = "r" ] && orderby=3
-	[ "$orderby" = "w" ] && orderby=4
-	[ "$orderby" = "T" ] && orderby=7
+	test "$orderby" = "t" && orderby=2
+	test "$orderby" = "r" && orderby=3
+	test "$orderby" = "w" && orderby=4
+	test "$orderby" = "T" && orderby=7
 
 	# Executa o iostat, le a saida e agrupa cada "ciclo de execucao"
 	# -d device apenas, -m mostra saida em MB/s
-	iostat -d -m $delay |
-	while read line; do
+	iostat -d -m $delay $iteration |
+	while read line
+	do
+
+		# Ignorando o cabeçalho do iostat, localizado nas 2 linhas iniciais
+		if test $i -lt 2
+		then
+			i=$((i + 1))
+			continue
+		fi
+
 		# faz o append da linha do iostat
-		if [ "$line" ]; then
+		if test -n "$line"
+		then
 			cycle="$cycle
 $line"
 		# se for line for vazio, terminou de ler o ciclo de saida do iostat
 		# mostra a saida conforme opcoes usadas
 		else
-			if [ "$top" ]; then
+			if test -n "$top"
+			then
 				clear
 				date '+%d/%m/%y - %H:%M:%S'
 				echo 'Device:            tps    MB_read/s    MB_wrtn/s    MB_read    MB_wrtn        MB_total/s'
@@ -8848,31 +9373,144 @@ $line"
 				totals=$(echo $reads $writes | awk '{print $1+$2}')
 				echo "$(date '+%d/%m/%y - %H:%M:%S') TPS = $tps; Read = $reads MB/s; Write = $writes MB/s ; Total = $totals MB/s"
 			fi
-			cycle='' # zera ciclo
+
+			# zera ciclo
+			cycle=''
 		fi
 	done
 }
 
 # ----------------------------------------------------------------------------
 # zzipinternet
-# http://www.getip.com
 # Mostra o seu número IP (externo) na Internet.
 # Uso: zzipinternet
 # Ex.: zzipinternet
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2005-09-01
-# Versão: 4
+# Versão: 5
 # Licença: GPL
 # ----------------------------------------------------------------------------
 zzipinternet ()
 {
 	zzzz -h ipinternet "$1" && return
 
-	local url='http://www.getip.com'
+	local url='http://ipaddress.com/'
 
 	# O resultado já vem pronto!
-	$ZZWWWDUMP "$url" | sed -n 's/^Current IP: //p'
+	zztool dump "$url" | sed -n 's/.*Your IP .ddress is: //p'
+}
+
+# ----------------------------------------------------------------------------
+# zzit
+# Uma forma de ler o site Inovação Tecnológica.
+# Sem opção mostra o resumo da página principal.
+#
+# Opções podem ser (ano)sub-temas e/ou número:
+#
+# Sub-temas podem ser:
+#   eletronica, energia, espaco, informatica, materiais,
+#   mecanica, meioambiente, nanotecnologia, robotica, plantao.
+#  Que podem ser precedido do ano ao qual se quer listar
+#
+# Se a opção for um número mostra a matéria selecionada,
+# seja da página principal ou de um sub-tema.
+#
+# Uso: zzit [[ano] sub-tema] [número]
+# Ex.: zzit                 # Um resumo da página principal
+#      zzit espaco          # Um resumo do sub-tem espaço
+#      zzit 3               # Exibe a terceira matéria da página principal
+#      zzit mecanica 7      # Exibe a sétima matéria do sub-tema mecânica
+#      zzit 2003 energia    # Um resumo do sub-tema energia em 2003
+#      zzit 2012 plantao 2  # Exibe a 2ª matéria de 2012 no sub-tema plantao
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2016-02-28
+# Versão: 3
+# Licença: GPL
+# Requisitos: zzsemacento zzutf8 zzxml zzsqueeze zzdatafmt zzlinha
+# ----------------------------------------------------------------------------
+zzit ()
+{
+
+	zzzz -h it "$1" && return
+
+	local url='http://www.inovacaotecnologica.com.br'
+	local ano url2 opcao num
+
+	if test -n "$1" && zztool testa_numero $1
+	then
+		if test "$1" -ge 2001 -a "$1" -le $(zzdatafmt -f AAAA hoje)
+		then
+			ano=$1
+			shift
+		fi
+	fi
+
+	opcao=$(echo "$1" | zzsemacento)
+	case "$opcao" in
+		eletronica | energia | espaco | informatica | materiais | mecanica | meioambiente | nanotecnologia | robotica | plantao )
+			if test -n "$ano"
+			then
+				if test "$opcao" = "meioambiente" -a "$ano" -eq 2001
+				then
+					return
+				fi
+				url2="$url/noticias/${opcao}_${ano}.html"
+			else
+				url2="$url/noticias/assuntos.php?assunto=$opcao"
+			fi
+			shift ;;
+		* )	url2="$url/index.php" ;;
+	esac
+
+	zztool testa_numero $1 && num=$1
+
+	if test -n "$ano"
+	then
+		if test -z "$num"
+		then
+			zztool dump "$url2" |
+			if test "$opcao" = "plantao"
+			then
+				sed -n '/^ *Plantão /,/- Arquivo/{ /^ *\*/!d; s/^ *\* *//; p; }'
+			else
+				sed -n '/^ *Notícias /,/- Arquivo/{ /^ *\*/!d; s/^ *\* *//; p; }'
+			fi |
+			awk '{ printf "%02d - %s\n", NR, $0 }'
+		else
+			url2=$(
+			zztool source "$url2" | zzutf8 |
+			sed -n '/Notícias /,/- Arquivo/{ /^<li>/!d; s/.*="//; s/".*//; p; }' |
+			zzlinha $num
+			)
+			zztool eco "$url2"
+			zztool dump "$url2" |
+			sed '1,/^ *\* *Plantão$/d; s/ *\(Bibliografia:\)/\
+\1/' |
+			sed 's/\[INS: *:INS\]//g; /Outras notícias sobre:/{s///;q;}' |
+			zzsqueeze | fmt -w 120
+		fi
+	else
+		zztool source "$url2" |
+		zzutf8 |
+		awk '/<div id="manchete">/,/Leia mais/' |
+		zzxml --untag=i --untag=u --untag=b --untag=img |
+		zzxml --tag a |
+		sed '/^<\/a>$/,/^<\/a>$/d;/^ *$/d;/assunto=/{N;d;}' |
+		if test -z "$num"
+		then
+			awk 'NR % 2 == 0 { printf "%02d - %s\n", NR / 2 , $0 }'
+		else
+			url2=$(awk -v linha=$num 'NR == linha * 2 -1' | sed 's/">//;s/.*"//;s|\.\./||' | sed "s|^|${url}/|")
+			zztool eco "$url2"
+			zztool dump "$url2" |
+			sed '1,/^ *\* *Plantão$/d; s/ *\(Bibliografia:\)/\
+\1/' |
+			sed 's/\[INS: *:INS\]//g; /Outras notícias sobre:/{s///;q;}' |
+			zzsqueeze | fmt -w 120
+		fi
+	fi
 }
 
 # ----------------------------------------------------------------------------
@@ -9016,7 +9654,7 @@ zzjquery ()
 			lista_cat=$(echo "$2" | zzcapitalize)
 			test "$lista_cat" = "Css" && lista_cat="CSS"
 			url_aux=$(
-				$ZZWWWHTML "$url" |
+				zztool source "$url" |
 				awk '/<aside/,/aside>/{print}' |
 				sed "/<ul class='children'>/,/<\/ul>/d" |
 				zzxml --untag=aside --tag a |
@@ -9030,7 +9668,7 @@ zzjquery ()
 
 		if test -n "$url"
 		then
-			$ZZWWWHTML "$url" |
+			zztool source "$url" |
 			sed -n '/title="Permalink to /{s/^[[:blank:]]*//;s/<[^>]*>//g;s/()//;p;}' |
 			zzunescape --html
 		fi
@@ -9038,7 +9676,7 @@ zzjquery ()
 	;;
 	--categoria | --categorias)
 
-		$ZZWWWHTML "$url" |
+		zztool source "$url" |
 		awk '/<aside/,/aside>/{print}' |
 		sed "/<ul class='children'>/,/<\/ul>/d" |
 		zzxml --tag li --untag  | zzlimpalixo | zzunescape --html
@@ -9050,15 +9688,15 @@ zzjquery ()
 		if test -n "$1"
 		then
 			url_aux=$(
-				$ZZWWWHTML "$url" |
+				zztool source "$url" |
 				sed -n '/title="Permalink to /{s/^[[:blank:]]*//;s/()//g;p;}' |
 				zzunescape --html |
 				awk -F '[<>"]' '{print "http:" $3, $9 }' |
-				awk '$2 ~ /^[.:]{0,1}'$1'[^a-z]*$/ { print $1 }'
+				awk '$2 ~ /^[.:]?'$1'[^a-z]*$/ { print $1 }'
 			)
 			test -n "$url_aux" && url="$url_aux" || url=''
 		else
-			url=${url}jQuery
+			url="${url}jQuery/"
 		fi
 
 		if test -n "$url"
@@ -9067,12 +9705,13 @@ zzjquery ()
 			do
 				zztool grep_var 'http://' "$url_aux" || url_aux="http://$url_aux"
 				zztool eco ${url_aux#*com/} | tr -d '/'
-				$ZZWWWHTML "$url_aux" |
+				zztool source "$url_aux" |
 				zzxml --tag article |
 				awk '/class="entry(-content| method)"/,/<\/article>/{ print }' |
 				if test "$sintaxe" = "1"
 				then
-					awk '/<ul class="signatures">/,/<div class="longdesc"/ { print }' | awk '/<span class="name">/,/<\/span>/ { print }; /<h4 class="name">/,/<\/h4>/ { print };'
+					awk '/<ul class="signatures">/,/<div class="longdesc"/ { print }' |
+					awk '/<span class="name">/,/<\/span>/ { print }; /<h4 class="name">/,/<\/h4>/ { print };'
 				else
 					awk '
 							/<ul class="signatures">/,/(<div class="longdesc"|<section class="entry-examples")/ { if ($0 ~ /<\/h4>/ || $0 ~ /<\/span>/ || $0 ~ /<\/div>/) { print } else { printf $0 }}
@@ -9146,14 +9785,6 @@ zzjuntalinhas ()
 	zztool file_stdin "$@" |
 		zzdos2unix |
 		sed "
-			# Exceção: Início e fim na mesma linha, mostra a linha e pronto
-			$inicio {
-				$fim {
-					p
-					d
-				}
-			}
-
 			# O algoritmo é simples: ao entrar no trecho escolhido ($inicio)
 			# vai guardando as linhas. Quando chegar no fim do trecho ($fim)
 			# faz a troca das quebras de linha pelo $separador.
@@ -9179,144 +9810,6 @@ zzjuntalinhas ()
 
 				d
 			}"
-}
-
-# ----------------------------------------------------------------------------
-# zzjuros
-# Mostra a listagem de taxas de juros que o Banco Central acompanha.
-# São instituições financeiras, que estão sob a supervisão do Banco Central.
-# Com argumento numérico, detalha a listagem solicitada.
-# A numeração fica entre 1 e 27
-#
-# Uso: zzjuros [numero consulta]
-# Ex.: zzjuros
-#      zzjuros 19  # Mostra as taxas de desconto de cheque para pessoa física.
-#
-# Autor: Itamar <itamarnet (a) yahoo com br>
-# Desde: 2013-05-06
-# Versão: 2
-# Licença: GPL
-# Requisitos: zzxml zzunescape
-# ----------------------------------------------------------------------------
-zzjuros ()
-{
-	zzzz -h juros "$1" && return
-
-	local nome
-	local url='http://www.bcb.gov.br/pt-br/sfn/infopban/txcred/txjuros/Paginas/default.aspx'
-	local cache=$(
-				$ZZWWWHTML "$url" |
-				sed -n '/Modalidades de/,/Histórico/p'|
-				zzxml --tag a --tag strong |
-				sed '/Historico.aspx/,$d;/^<\//d' |
-				awk '/href|strong/ {
-					printf $0 "|"
-					getline
-					print
-					}' |
-				sed '1d;$d;s/.*="//;s/">//' |
-				awk '{if ($0 ~ /pt-br/) { print $0 "|" ++item } else print }'
-				)
-
-	# Testa se foi fornecido um numero dentre as opções disponiveis.
-	if zztool testa_numero $1
-	then
-		test $1 -gt 27 -o $1 -lt 1 && { zztool -e uso juros; return 1; }
-
-		# Buscando o nome e a url a ser pesquisada
-		nome=$(echo "$cache" | grep "|${1}$" | cut -f 2 -d "|")
-		url=$(echo "$cache" | grep "|${1}$" | zzunescape --html | cut -f 1 -d "|")
-		url="http://www.bcb.gov.br${url}"
-
-		# Fazendo a busca e filtrando no site do Banco Central.
-		zztool eco "$nome"
-		$ZZWWWDUMP "$url" |
-		sed -n '/^ *Posição *$/,/^ *Atendimento/p' | sed '$d' |
-		awk '{
-			gsub(/  */," ")
-			if (NR % 4 == 1) {linha1 = $0}
-			if (NR % 4 == 2) {linha2 = $0}
-			if (NR % 4 == 3) {linha3 = $0}
-			if (NR % 4 == 0) {
-				linha4 = $0
-				printf "%-7s %-40s %8s %8s\n", linha1, linha2, linha3, linha4
-			}
-		}'
-
-	else
-
-		echo "$cache" |
-		awk -F "|" '{
-			if ($1 ~ /strong/) {
-				if ($2 ~ /jurídica/) print ""
-				print $2
-			} else {
-				printf "%3s. %s\n", $3, $2
-			}
-		}'
-
-	fi
-}
-
-# ----------------------------------------------------------------------------
-# zzkill
-# Mata processos pelo nome do seu comando de origem.
-# Com a opção -n, apenas mostra o que será feito, mas não executa.
-# Se nenhum argumento for informado, mostra a lista de processos ativos.
-# Uso: zzkill [-n] [comando [comando2 ...]]
-# Ex.: zzkill
-#      zzkill netscape
-#      zzkill netsc soffice startx
-#
-# Autor: Ademar de Souza Reis Jr.
-# Desde: 2000-05-15
-# Versão: 1
-# Licença: GPL
-# ----------------------------------------------------------------------------
-zzkill ()
-{
-	zzzz -h kill "$1" && return
-
-	local nao comandos comando processos pid chamada
-
-	# Opções de linha de comando
-	if test "$1" = '-n'
-	then
-		nao='[-n]\t'
-		shift
-	fi
-
-	while :
-	do
-		comando="$1"
-
-		# Tenta obter a lista de processos nos formatos Linux e BSD
-		processos=$(ps xw --format pid,comm 2>/dev/null) ||
-		processos=$(ps xw -o pid,command 2>/dev/null)
-
-		# Diga não ao suicídio
-		processos=$(echo "$processos" | grep -vw '\(zz\)*kill')
-
-		# Sem argumentos, apenas mostra a listagem e sai
-		if ! test -n "$1"
-		then
-			echo "$processos"
-			return 0
-		fi
-
-		# Filtra a lista, extraindo e matando os PIDs
-		echo "$processos" |
-			grep -i "$comando" |
-			while read pid chamada
-			do
-				print '%b\n' "$nao$pid\t$chamada"
-				test -n "$nao" || kill $pid
-			done
-
-		# Próximo da fila!
-		shift
-		test -n "$1" || break
-	done
 }
 
 # ----------------------------------------------------------------------------
@@ -9422,7 +9915,7 @@ zzlembrete ()
 	zzzz -h lembrete "$1" && return
 
 	local numero tmp
-	local arquivo="$HOME/.zzlembrete"
+	local arquivo="${ZZTMPDIR:-$HOME}/.zzlembrete"
 
 	# Assegura-se que o arquivo de lembretes existe
 	test -f "$arquivo" || touch "$arquivo"
@@ -9433,17 +9926,20 @@ zzlembrete ()
 		cat -n "$arquivo"
 
 	# Tem argumentos, que podem ser para mostrar, apagar ou adicionar
-	elif echo "$*" | tr -s '\t ' ' ' | grep '^ *[0-9]\{1,\} *d\{0,1\} *$' >/dev/null
+	elif echo "$*" | tr -s '\t ' '  ' | grep '^ *[0-9]\{1,\} *d\{0,1\} *$' >/dev/null
 	then
 		# Extrai o número da linha
 		numero=$(echo "$*" | tr -d -c 0123456789)
+
+		# Se não for um número ou menor igual a zero sai com erro.
+		zztool testa_numero "$numero" && test "$numero" -gt 0 || return 1
 
 		if zztool grep_var d "$*"
 		then
 			# zzlembrete 5d: Apaga linha 5
 			tmp=$(zztool mktemp lembrete)
 			cp "$arquivo" "$tmp" &&
-			sed "${numero:-0} d" "$tmp" > "$arquivo" || {
+			sed "$numero d" "$tmp" > "$arquivo" || {
 				zztool erro "Ops, deu algum erro no arquivo $arquivo"
 				zztool erro "Uma cópia dele está em $tmp"
 				return 1
@@ -9502,7 +9998,7 @@ zzlembrete ()
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-03-17
-# Versão: 13
+# Versão: 15
 # Licença: GPL
 # Requisitos: zzecho zzpad zzdatafmt
 # ----------------------------------------------------------------------------
@@ -9514,26 +10010,32 @@ zzlibertadores ()
 	local cache=$(zztool cache libertadores)
 	local url="http://esporte.uol.com.br/futebol/campeonatos/libertadores/jogos/"
 	local awk_jogo='
-		NR % 3 == 1 { time1=$0; if ($(NF-1) ~ /^[0-9]{1,}$/) { penais1=$(NF -1)} else {penais1=""} }
-		NR % 3 == 2 {
-			if ($NF ~ /^[0-9-]{1,}$/) { reserva=$NF " "; $NF=""; } else reserva=""
-			time2=reserva $0
-			if ($(NF-1) ~ /^[0-9]{1,}$/ ) { penais2=$(NF -1)} else {penais2=""}
-			if (length(penais1)>0 && length(penais2)>0) {
-				sub(" " penais1, "", time1)
-				sub(" " penais2, "", time2)
-				penais1 = " ( " penais1
-				penais2 = penais2 " ) "
+		NR % 3 ~ /^[12]$/ {
+			if ($1 ~ /^[0-9-]+$/ && $2 ~ /^[0-9-]+$/) {
+				penais[NR % 3]=$1; placar[NR % 3]=$2; $1=""; $2=""
 			}
-			else {penais1="";penais2=""}
+			else if ($1 ~ /^[0-9-]+$/ && $2 !~ /^[0-9-]+$/) {
+				penais[NR % 3]=""; placar[NR % 3]=$1; $1=""
+			}
+			sub(/^ */,"");sub(/ *$/,"")
+			time[NR % 3]=" " $0 " "
 		}
-		NR % 3 == 0 { sub(/  *$/,""); print time1 penais1 "|" penais2 time2 "|" $0 }
+		NR % 3 == 0 {
+			if (length(penais[1])>0 && length(penais[2])>0) {
+				placar[1] = placar[1] " ( " penais[1]
+				placar[2] = penais[2] " ) " placar[2]
+			}
+			else {
+				penais[1]="";penais[2]=""
+			}
+			sub(/  *$/,""); print time[1] placar[1] "|" placar[2] time[2] "|" $0
+			placar[1]="";placar[2]=""
+		}
 		'
 	local sed_mata='
 		1d; $d
 		/Confronto/d;/^ *$/d;
-		s/pós[ -]jogo//; s/^ *//; s/__*//g; s/[A-Z][A-Z][A-Z] //;
-		s/\([0-9]\{1,\}\) *pênaltis *\([0-9]\{1,\}\)\(.*\) X \(.*$\)/\3 (\1 X \2) \4/g
+		s/pós[ -]jogo *//; s/^ *//; s/__*//g; s/ [A-Z][A-Z][A-Z]//;
 	'
 	local time1 time2 horario linha
 
@@ -9544,7 +10046,7 @@ zzlibertadores ()
 	if ! test -s "$cache" || test $(head -n 1 "$cache") != $(zzdatafmt --iso hoje)
 	then
 		zzdatafmt --iso hoje > "$cache"
-		$ZZWWWDUMP "$url" >> "$cache"
+		zztool dump "$url" >> "$cache"
 	fi
 
 	# Mostrando os jogos
@@ -9552,7 +10054,7 @@ zzlibertadores ()
 	# Fase 1 (Pré-libertadores)
 	case "$1" in
 	1 | pr[eé] | primeira)
-		sed -n '/PRIMEIRA FASE/,/SEGUNDA/p' "$cache" |
+		sed -n '/PRIMEIRA FASE/,/FASE DE GRUPOS/{/FASE/d; p;}' "$cache" |
 		sed "$sed_mata" |
 		awk "$awk_jogo" |
 		while read linha
@@ -9560,7 +10062,7 @@ zzlibertadores ()
 			time1=$(  echo $linha | cut -d"|" -f 1 )
 			time2=$(  echo $linha | cut -d"|" -f 2 )
 			horario=$(echo $linha | cut -d"|" -f 3 )
-			echo "$(zzpad -l 28 $time1) X $(zzpad -r 28 $time2) $horario"
+			echo "$(zzpad -l 45 $time1) X $(zzpad -r 45 $time2) $horario"
 		done
 	;;
 	# Fase 2 (Fase de Grupos)
@@ -9572,7 +10074,7 @@ zzlibertadores ()
 		done
 	;;
 	3 | oitavas)
-		sed -n '/^OITAVAS DE FINAL/,/^ *\*/p' "$cache" |
+		sed -n '/^OITAVAS DE FINAL/,/^Notícias/p' "$cache" |
 		sed "$sed_mata" |
 		sed 's/.*\([0-9]º\)/\1/' |
 		awk "$awk_jogo" |
@@ -9612,9 +10114,9 @@ zzlibertadores ()
 		echo "Grupo $2"
 		sed -n "/^ *Grupo $2/,/Grupo /p"  "$cache"|
 		sed '
-			/Rodada [2-9]/d;
-			/Classificados para as oitavas de final/,$d
-			1,5d' |
+			1d; /°/d; /Rodada [2-9]/d;
+			/ para as oitavas de final/,$d
+			' |
 		sed "$sed_mata" |
 		awk "$awk_jogo" |
 		sed 's/\(h[0-9][0-9]\).*$/\1/' |
@@ -9634,7 +10136,9 @@ zzlibertadores ()
 		then
 			grupo="$2"
 			sed -n "/^ *Grupo $2/,/Rodada 1/p" "$cache" | sed -n '/PG/p;/°/p' |
+			sed 's/ LDU / ldu /g'|
 			sed 's/[^-][A-Z][A-Z][A-Z] //;s/ [A-Z][A-Z][A-Z]//' |
+			sed 's/ ldu / LDU /g'|
 			awk -v cor_awk="$ZZCOR" '{
 				if (NF <  10) { print }
 				if (NF == 10) {
@@ -9704,26 +10208,26 @@ zzlimpalixo ()
 	# Reconhecimento de comentários
 	# Incluida opção de escolher o tipo, pois o arquivo pode vir via pipe, e não seria possível reconhecer a extensão do arquivo
 	case "$1" in
-		*.vim | *.vimrc*)			comentario='"';;
-		--vim)					comentario='"';shift;;
-		*.asp)					comentario="'";;
-		--asp)					comentario="'";shift;;
-		*.asm)					comentario=';';;
-		--asm)					comentario=';';shift;;
-		*.ada | *.sql | *.e)			comentario='--';;
-		--ada | --sql | --e)			comentario='--';shift;;
-		*.bat)					comentario='rem';;
-		--bat)					comentario='rem';shift;;
-		*.tex)					comentario='%';;
-		--tex)					comentario='%';shift;;
-		*.c | *.css)				multi=1;;
-		--c | --css)				multi=1;shift;;
-		*.html | *.htm | *.xml)			comentario_ini='<!--'; comentario_fim='-->'; multi=1;;
-		--html | --htm | --xml)			comentario_ini='<!--'; comentario_fim='-->'; multi=1;shift;;
-		*.jsp)					comentario_ini='<%--'; comentario_fim='-->'; multi=1;;
-		--jsp)					comentario_ini='<%--'; comentario_fim='-->'; multi=1;shift;;
-		*.cc | *.d | *.js | *.php | *.scala)	comentario='\/\/';;
-		--cc | --d | --js | --php | --scala)	comentario='\/\/';shift;;
+		*.vim | *.vimrc*)                    comentario='"';;
+		--vim)                               comentario='"';   shift;;
+		*.asp)                               comentario="'";;
+		--asp)                               comentario="'";   shift;;
+		*.asm)                               comentario=';';;
+		--asm)                               comentario=';';   shift;;
+		*.ada | *.sql | *.e)                 comentario='--';;
+		--ada | --sql | --e)                 comentario='--';  shift;;
+		*.bat)                               comentario='rem';;
+		--bat)                               comentario='rem'; shift;;
+		*.tex)                               comentario='%';;
+		--tex)                               comentario='%';   shift;;
+		*.c | *.css)                         multi=1;;
+		--c | --css)                         multi=1;shift;;
+		*.html | *.htm | *.xml)              comentario_ini='<!--'; comentario_fim='-->'; multi=1;;
+		--html | --htm | --xml)              comentario_ini='<!--'; comentario_fim='-->'; multi=1; shift;;
+		*.jsp)                               comentario_ini='<%--'; comentario_fim='-->'; multi=1;;
+		--jsp)                               comentario_ini='<%--'; comentario_fim='-->'; multi=1; shift;;
+		*.cc | *.d | *.js | *.php | *.scala) comentario='\/\/';;
+		--cc | --d | --js | --php | --scala) comentario='\/\/'; shift;;
 	esac
 
 	# Arquivos via STDIN ou argumentos
@@ -9761,7 +10265,7 @@ zzlimpalixo ()
 # Desde: 2004-12-23
 # Versão: 2
 # Licença: GPL
-# Requisitos: zzaleatorio
+# Requisitos: zzaleatorio zztestar
 # ----------------------------------------------------------------------------
 zzlinha ()
 {
@@ -9778,7 +10282,7 @@ zzlinha ()
 	fi
 
 	# Talvez o $1 é o número da linha desejada?
-	if zztool testa_numero_sinal "$1"
+	if zztestar numero_sinal "$1"
 	then
 		n="$1"
 		shift
@@ -9787,7 +10291,7 @@ zzlinha ()
 	# Se informado um ou mais arquivos, eles existem?
 	for arquivo in "$@"
 	do
-		zztool arquivo_legivel "$arquivo" || return 1
+		zztool -e arquivo_legivel "$arquivo" || return 1
 	done
 
 	if test -n "$n"
@@ -9811,29 +10315,10 @@ zzlinha ()
 		# aleatória deste resultado.
 		# Nota: Arquivos via STDIN ou argumentos
 		resultado=$(zztool file_stdin "$@" | grep -h -i -- "${padrao:-.}")
-		num_linhas=$(echo "$resultado" | sed -n '$=')
+		num_linhas=$(echo "$resultado" | zztool num_linhas)
 		n=$(zzaleatorio 1 $num_linhas)
 		echo "$resultado" | sed -n "${n}p"
 	fi
-}
-
-# ----------------------------------------------------------------------------
-# zzlinux
-# http://www.kernel.org/kdist/finger_banner
-# Mostra as versões disponíveis do Kernel Linux.
-# Uso: zzlinux
-# Ex.: zzlinux
-#
-# Autor: Diogo Gullit <guuuuuuuuuullit (a) yahoo com br>
-# Desde: 2008-05-01
-# Versão: 2
-# Licença: GPL
-# ----------------------------------------------------------------------------
-zzlinux ()
-{
-	zzzz -h linux "$1" && return
-
-	$ZZWWWDUMP http://www.kernel.org/kdist/finger_banner | grep -v '^$'
 }
 
 # ----------------------------------------------------------------------------
@@ -9881,7 +10366,7 @@ zzlinuxnews ()
 	# Linux Today
 	if zztool grep_var t "$sites"
 	then
-		url='http://linuxtoday.com/backend/biglt.rss'
+		url='http://www.linuxtoday.com/backend/biglt.rss'
 		echo
 		zztool eco "* Linux Today ($url):"
 		zzfeed -n $n "$url"
@@ -9943,6 +10428,25 @@ zzlinuxnews ()
 }
 
 # ----------------------------------------------------------------------------
+# zzlinux
+# http://www.kernel.org/kdist/finger_banner
+# Mostra as versões disponíveis do Kernel Linux.
+# Uso: zzlinux
+# Ex.: zzlinux
+#
+# Autor: Diogo Gullit <guuuuuuuuuullit (a) yahoo com br>
+# Desde: 2008-05-01
+# Versão: 2
+# Licença: GPL
+# ----------------------------------------------------------------------------
+zzlinux ()
+{
+	zzzz -h linux "$1" && return
+
+	zztool source http://www.kernel.org/kdist/finger_banner | grep -v '^$'
+}
+
+# ----------------------------------------------------------------------------
 # zzlocale
 # Busca o código do idioma (locale) - por exemplo, português é pt_BR.
 # Com a opção -c, pesquisa somente nos códigos e não em sua descrição.
@@ -9977,7 +10481,7 @@ zzlocale ()
 	# Se o cache está vazio, baixa listagem da Internet
 	if ! test -s "$cache"
 	then
-		$ZZWWWDUMP "$url" > "$cache"
+		zztool download "$url" "$cache"
 	fi
 
 	# Faz a consulta
@@ -10059,56 +10563,48 @@ In gravida, neque a mattis tincidunt, velit arcu cursus nisi, eu blandit risus l
 
 # ----------------------------------------------------------------------------
 # zzloteria
-# http://www1.caixa.gov.br/loterias
 # Resultados da quina, megasena, duplasena, lotomania, lotofácil, federal, timemania e loteca.
 #
 # Se o 2º argumento for um número, pesquisa o resultado filtrando o concurso.
+# Se o 2º argumento for a palavra "quantidade" ou "qtde" mostra quantas vezes
+#  um número foi sorteado. ( Não se aplica para federal e loteca )
 # Se nenhum argumento for passado, todas as loterias são mostradas.
 #
-# Uso: zzloteria [[loteria suportada] concurso]
+# Uso: zzloteria [[loterias suportadas] [concurso|[quantidade|qtde]]
 # Ex.: zzloteria
 #      zzloteria quina megasena
 #      zzloteria loteca 550
+#      zzloteria quina qtde
 #
-# Autor: Itamar <itamarnet (a) yahoo com br>
+# Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2004-05-18
-# Versão: 12
+# Versão: 16
 # Licença: GPL
-# Requisitos: zzseq zzjuntalinhas zzdatafmt
+# Requisitos: zzdatafmt zztrim zzunescape zzxml
+# Nota: requer unzip
 # ----------------------------------------------------------------------------
 zzloteria ()
 {
 	zzzz -h loteria "$1" && return
 
-	local dump numero_concurso data resultado acumulado tipo ZZWWWDUMP2
-	local resultado_val resultado_num num_con sufixo faixa download
-	local url='http://www1.caixa.gov.br/loterias/loterias'
+	local tipo num_con qtde
+	local url='https://confiraloterias.com.br'
 	local tipos='quina megasena duplasena lotomania lotofacil federal timemania loteca'
 	local cache=$(zztool cache loteria)
 	local tab=$(printf '\t')
-
-	if which links >/dev/null 2>&1
-	then
-		ZZWWWDUMP2='links -dump'
-		download='links -source'
-	else
-		zztool erro 'Para esta função funcionar, é necessário instalar o navegador de modo texto "links", "links2" ou "elinks".'
-		return 1
-	fi
+	local un_zip='unzip -q -a -C -o'
+	local tmp_dir="${ZZTMP%/*}"
 
 	# Caso o segundo argumento seja um numero, filtra pelo concurso equivalente
-	zztool testa_numero "$2"
-	if (test $? -eq 0)
+	if zztool testa_numero "$2"
 	then
-		tipos="$1"
-		case $tipos in
-			duplasena | federal | timemania | loteca)
-				num_con="?submeteu=sim&opcao=concurso&txtConcurso=$2"
-			;;
-			*) num_con=$2 ;;
-		esac
+		tipos=$1
+		num_con=$2
+	elif test 'quantidade' = "$2" -o 'qtde' = "$2"
+	then
+		tipos=$1
+		num_con=0
 	else
-	# Caso contrario mostra todos os tipos, ou alguns selecionados
 		unset num_con
 		test -n "$1" && tipos="$*"
 	fi
@@ -10117,310 +10613,437 @@ zzloteria ()
 	for tipo in $tipos
 	do
 
-		# Há várias pegadinhas neste código. Alguns detalhes:
-		# - A variável $dump é um cache local do resultado
-		# - É usado ZZWWWDUMP2+filtros (e não ZZWWWHTML) para forçar a saída em UTF-8
-		# - O resultado é deixado como uma única longa linha
-		# - O resultado são vários campos separados por pipe |
-		# - Cada tipo de loteria traz os dados em posições (e formatos) diferentes :/
+		# Para o caso de ser fornecido "lotofácil"
+		tipo=$(echo "$tipo" | sed 's/á/a/')
 
-		case "$tipo" in
-			duplasena)
-				sufixo="_pesquisa_new.asp"
-			;;
-			*)
-				sufixo="_pesquisa.asp"
-			;;
-		esac
-
-		dump=$($ZZWWWDUMP2 "$url/$tipo/${tipo}${sufixo}$num_con" |
-				tr -d \\n |
-				sed 's/  */ /g ; s/^ //')
-
-		# O número do concurso é sempre o primeiro campo
-		numero_concurso=$(echo "$dump" | cut -d '|' -f 1)
-
-		case "$tipo" in
-			lotomania)
-			faixa=$(zzseq -f "\t%d ptos\n" 20 1 16)
-			printf %b "${faixa}\n\t 0 ptos" > "${cache}"
-			if ! zztool testa_numero "$num_con"
-			then
-				# O resultado vem separado em campos distintos. Exemplo:
-				# |01|04|06|12|21|25|27|36|42|44|50|51|53|59|68|69|74|78|87|91|91|
-
-				data=$(     echo "$dump" | cut -d '|' -f 42)
-				acumulado=$(echo "$dump" | awk -F "|" '{print $(NF-1) "|" $NF}')
-				resultado=$(echo "$dump" | cut -d '|' -f 7-26 |
-					sed 's/|/@/10 ; s/|/ - /g' |
-					tr @ '\n'
-				)
-				echo "$dump" | cut -d '|' -f 28,30,32,34,36,38 | tr '|' '\n' > "${cache}.num"
-				echo "$dump" | cut -d '|' -f 29,31,33,35,37,39 | tr '|' '\n' > "${cache}.val"
-			else
-				if ! test -e ${ZZTMP}.lotomania.htm || ! $(grep "^$num_com " ${ZZTMP}.lotomania.htm >/dev/null)
-				then
-					$download "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_lotoma.zip" > "${ZZTMP}.lotomania.zip" 2>/dev/null
-					unzip -q -o "${ZZTMP}.lotomania.zip" -d "${ZZTMP%/*}" 2>/dev/null
-					mv -f "${ZZTMP%/*}/D_LOTMAN.HTM" ${ZZTMP}.lotomania.htm
-					rm -f ${ZZTMP}.lotomania.zip ${ZZTMP%/*}/T11.GIF
-				fi
-				numero_concurso=$num_con
-				dump=$($ZZWWWDUMP2 ${ZZTMP}.lotomania.htm | awk '$1=='$num_con)
-				data=$(echo "$dump" | awk '{print $2}')
-				acumulado=$(echo "$dump" |
-					awk '{
-							pos=29
-							limite=0
-							while (limite<=13){
-								if ($pos ~ /[0-9],[0-9]+$/) { limite++ }
-								if (limite==13) { print $pos; break }
-								pos++
-							}
-						}')
-				resultado=$(echo "$dump" |
-					awk '{for (i=3;i<=22;i++) printf $i " " } END { print "" }' |
-					while read resultado_val
-					do
-						echo "$resultado_val" | zztool list2lines | sort -n | zztool lines2list
-					done |
-					sed 's/ /\
-/10' | sed 's/ *$//'
-					)
-				resultado=$(echo "$resultado" | sed 's/ / - /g')
-				echo "$dump" |
-					awk '{
-							print $24
-							pos=25
-							limite=1
-							while (limite<=5) {
-								if ($pos ~ /^[0-9]+$/) { printf $pos " " ; limite++ }
-								pos++
-							}
-						}' | zztool list2lines > "${cache}.num"
-				echo "$dump" |
-					awk '{
-							pos=29
-							limite=1
-							while (limite<=6) {
-								if ($pos ~ /[0-9],[0-9]+$/) { printf $pos " " ; limite++ }
-								pos++
-							}
-						}' | tr ' ' '\n' > "${cache}.val"
-			fi
-			;;
-			lotof[áa]cil)
-				# O resultado vem separado em campos distintos. Exemplo:
-				# |01|04|07|08|09|10|12|14|15|16|21|22|23|24|25|
-
-				faixa=$(zzseq -f "\t%d ptos\n" 15 1 11)
-				echo "$faixa" > "${cache}"
-				if ! zztool testa_numero "$num_con"
-				then
-					resultado=$(echo "$dump" | cut -d '|' -f 4-18 |
-						sed 's/|/@/10 ; s/|/@/5 ; s/|/ - /g' |
-						tr @ '\n'
-					)
-					echo "$dump" | cut -d '|' -f 19,21,23,25,27 | tr '|' '\n' > "${cache}.num"
-					echo "$dump" | cut -d '|' -f 20,22,24,26,28 | tr '|' '\n' > "${cache}.val"
-					dump=$(    echo "$dump" | sed 's/.*Estimativa de Pr//')
-					data=$(     echo "$dump" | cut -d '|' -f 6)
-					acumulado=$(echo "$dump" | cut -d '|' -f 25,26)
-				else
-					if ! test -e ${ZZTMP}.lotofacil.htm || ! $(grep "^$num_com " ${ZZTMP}.lotofacil.htm >/dev/null)
-					then
-						$download "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_lotfac.zip" > "${ZZTMP}.lotofacil.zip" 2>/dev/null
-						unzip -q -o "${ZZTMP}.lotofacil.zip" -d "${ZZTMP%/*}" 2>/dev/null
-						mv -f "${ZZTMP%/*}/D_LOTFAC.HTM" ${ZZTMP}.lotofacil.htm
-						rm -f ${ZZTMP}.lotofacil.zip ${ZZTMP%/*}/LOTFACIL.GIF
-					fi
-					numero_concurso=$num_con
-					dump=$($ZZWWWDUMP2 ${ZZTMP}.lotofacil.htm | awk '$1=='$num_con)
-					data=$(echo "$dump" | awk '{print $2}')
-					acumulado=$(echo "$dump" | awk '{print $(NF-2)}')
-					resultado=$(echo "$dump" |
-						awk '{print $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17}' |
-						while read resultado_val
-						do
-							echo "$resultado_val" | zztool list2lines | sort -n | zztool lines2list
-						done |
-						sed 's/ /\
-/5;s/ /\
-/9'
-						)
-					resultado=$(echo "$resultado" | sed 's/ / - /g')
-					echo "$dump" | awk '{print $19;     print $(NF-11); print $(NF-10); print $(NF-9); print $(NF-8)}' > "${cache}.num"
-					echo "$dump" | awk '{print $(NF-7); print $(NF-6); print $(NF-5); print $(NF-4); print $(NF-3)}' > "${cache}.val"
-				fi
-			;;
-			megasena)
-				# O resultado vem separado por asteriscos. Exemplo:
-				# | * 16 * 58 * 43 * 37 * 52 * 59 |
-
-				faixa=$(printf '%b' "\tSena\n\tQuina\n\tQuadra\n")
-				echo "$faixa" > "${cache}"
-				if ! zztool testa_numero "$num_con"
-				then
-					data=$(     echo "$dump" | cut -d '|' -f 12)
-					acumulado=$(echo "$dump" | cut -d '|' -f 22,23)
-					resultado=$(echo "$dump" | cut -d '|' -f 21 |
-						tr '*' '-'  |
-						tr '|' '\n' |
-						sed 's/^ - //'
-					)
-					echo "$dump" | cut -d '|' -f 4,6,8 | tr '|' '\n' > "${cache}.num"
-					echo "$dump" | cut -d '|' -f 5,7,9 | tr '|' '\n' > "${cache}.val"
-				else
-					if ! test -e ${ZZTMP}.mega.htm || ! $(grep "^$num_com " ${ZZTMP}.mega.htm >/dev/null)
-					then
-						$download "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_mgsasc.zip" > "${ZZTMP}.mega.zip" 2>/dev/null
-						unzip -q -o "${ZZTMP}.mega.zip" -d "${ZZTMP%/*}" 2>/dev/null
-						mv -f "${ZZTMP%/*}/d_megasc.htm" ${ZZTMP}.mega.htm
-						rm -f ${ZZTMP}.mega.zip ${ZZTMP%/*}/T2.GIF
-					fi
-					numero_concurso=$num_con
-					dump=$($ZZWWWDUMP2 ${ZZTMP}.mega.htm | awk '$1=='$num_con)
-					data=$(echo "$dump" | awk '{print $2}')
-					acumulado=$(echo "$dump" | awk '{print $(NF-2)}')
-					resultado=$(echo "$dump" | awk '{print $3, $4, $5, $6, $7, $8}')
-					resultado=$(echo "$resultado" | sed 's/ / - /g')
-					echo "$dump" | awk '{print $10;     print $(NF-7); print $(NF-5)}' > "${cache}.num"
-					echo "$dump" | awk '{print $(NF-8); print $(NF-6); print $(NF-4)}' > "${cache}.val"
-				fi
-			;;
-			duplasena)
-				# O resultado vem separado por asteriscos, tendo dois grupos
-				# numéricos: o primeiro e segundo resultado. Exemplo:
-				# | * 05 * 07 * 09 * 21 * 38 * 40 | * 05 * 17 * 20 * 22 * 31 * 45 |
-
-				data=$(     echo "$dump" | cut -d '|' -f 18)
-				acumulado=$(echo "$dump" | cut -d '|' -f 23,24)
-				resultado=$(echo "$dump" | cut -d '|' -f 4,5 |
-					tr '*' '-'  |
-					tr '|' '\n' |
-					sed 's/^ - //'
-				)
-				faixa=$(printf %b "\t1a Sena\n\t1a Quina\n\t1a Quadra\n\n\t2a Sena\n\t2a Quina\n\t2a Quadra\n")
-				echo "$faixa" > "${cache}"
-				echo "$dump" | awk 'BEGIN {FS="|";OFS="\n"} {print $7,$26,$28,"",$9,$10,$13}' > "${cache}.num"
-				echo "$dump" | awk 'BEGIN {FS="|";OFS="\n"} {print $8,$27,$29,"",$11,$12,$14}' > "${cache}.val"
-			;;
-			quina)
-				# O resultado vem separado por asteriscos. Exemplo:
-				# | * 07 * 13 * 42 * 56 * 69 |
-
-				faixa=$(printf %b "\tQuina\n\tQuadra\n\tTerno\n")
-				echo "$faixa" > "${cache}"
-				if ! zztool testa_numero "$num_con"
-				then
-					dump=$(     echo "$dump" | zzjuntalinhas)
-					data=$(     echo "$dump" | cut -d '|' -f 17)
-					acumulado=$(echo "$dump" | cut -d '|' -f 18,19)
-					resultado=$(echo "$dump" | cut -d '|' -f 15 |
-						tr '*' '-'  |
-						sed 's/^ - //'
-					)
-					echo "$dump" | cut -d '|' -f 7,9,11 | tr '|' '\n' > "${cache}.num"
-					echo "$dump" | cut -d '|' -f 8,10,12 | tr '|' '\n' > "${cache}.val"
-				else
-					if ! test -e ${ZZTMP}.quina.htm || ! $(grep "^$num_com " ${ZZTMP}.quina.htm >/dev/null)
-					then
-						$download "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_quina.zip" > "${ZZTMP}.quina.zip" 2>/dev/null
-						unzip -q -o "${ZZTMP}.quina.zip" -d "${ZZTMP%/*}" 2>/dev/null
-						mv -f "${ZZTMP%/*}/D_QUINA.HTM" ${ZZTMP}.quina.htm
-						rm -f ${ZZTMP}.quina.zip ${ZZTMP%/*}/T7.GIF
-					fi
-					numero_concurso=$num_con
-					dump=$($ZZWWWDUMP2 ${ZZTMP}.quina.htm | awk '$1=='$num_con)
-					data=$(echo "$dump" | awk '{print $2}')
-					acumulado=$(echo "$dump" | awk '{print $(NF-2)}')
-					resultado=$(echo "$dump" | awk '{print $3, $4, $5, $6, $7}' | zztool list2lines | sort -n | zztool lines2list)
-					resultado=$(echo "$resultado" | sed 's/ / - /g')
-					echo "$dump" | awk '{print $9;     print $(NF-7); print $(NF-5)}' > "${cache}.num"
-					echo "$dump" | awk '{print $(NF-8); print $(NF-6); print $(NF-4)}' > "${cache}.val"
-				fi
-			;;
-			federal)
-				data=$(     echo "$dump" | cut -d '|' -f 17)
-				numero_concurso=$(echo "$dump" | cut -d '|' -f 3)
-				unset acumulado
-
-				echo "$dump" | cut -d '|' -f 7,9,11,13,15 |
-					tr '*' '-'  |
-					tr '|' '\n' |
-					sed 's/^ - //' > "${cache}.num"
-
-				echo "$dump" | cut -d '|' -f 8,10,12,14,16 |
-					tr '*' '-'  |
-					tr '|' '\n' |
-					sed 's/^ - //' > "${cache}.val"
-
-				zzseq -f "%do Prêmio\n" 1 1 5 > $cache
-
-				resultado=$(paste "$cache" "${cache}.num" "${cache}.val")
-				unset faixa resultado_num resultado_val
-			;;
-			timemania)
-				data=$(     echo "$dump" | cut -d '|' -f 2)
-				acumulado=$(echo "$dump" | cut -d '|' -f 24)
-				acumulado=${acumulado}"|"$(echo "$dump" | cut -d '|' -f 23 | zzdatafmt)
-				resultado=$(echo "$dump" | cut -d '|' -f 8 |
-					tr '*' '-'  |
-					tr '|' '\n' |
-					sed 's/^ - //'
-				)
-				resultado=$(printf %b "${resultado}\nTime: "$(echo "$dump" | cut -d '|' -f 9))
-				faixa=$(zzseq -f "\t%d ptos\n" 7 1 3)
-				echo "$faixa" > "${cache}"
-				echo "$dump" | cut -d '|' -f 10,12,14,16,18 | tr '|' '\n' > "${cache}.num"
-				echo "$dump" | cut -d '|' -f 11,13,15,17,19 | tr '|' '\n' > "${cache}.val"
-			;;
-			loteca)
-				dump=$(     echo "$dump" | sed 's/[A-Z]|[A-Z]/-/g')
-				data=$(     echo "$dump" | awk -F"|" '{print $(NF-4)}' )
-				acumulado=$(echo "$dump" | awk -F"|" '{print $(NF-1) "|" $(NF)}' )
-				acumulado="${acumulado}_Acumulado para a 1a faixa "$(echo "$dump" | awk -F"|" '{print $(NF-5)}' )
-				acumulado="${acumulado}_"$(echo "$dump" | awk -F"|" '{print $(NF-2)}' )
-				acumulado=$(echo "${acumulado}" | sed 's/_/\
-   /g;s/ Valor //' )
-				resultado=$($ZZWWWDUMP2 "$url/$tipo/${tipo}${sufixo}$num_con" |
-				sed -n '3,/|/p' |
-				awk '
-					NR == 1 { sub("Data","Coluna"); sub(" X ","   ") }
-					NR >= 2 {
-						if (NF > 5) {
-							if ( $2 > $(NF-1) )  { coluna = "Col.  1" }
-							if ( $2 == $(NF-1) ) { coluna = "Col. Meio" }
-							if ( $2 < $(NF-1) )  { coluna = "Col.  2" }
-							sub($NF "  ", coluna)
-						}
-					}
-					{if (NF > 5) print }
-				')
-				case $(echo "$num_con" | sed 's/.*=//;s/ *//g') in
-					[1-9] | [1-8][0-9]) faixa=$(zzseq -f '\t%d\n' 14 12);;
-					*) faixa=$(zzseq -f '\t%d\n' 14 13);;
-				esac
-				echo "$faixa" > "${cache}"
-				echo "$dump" | cut -d '|' -f 5 | sed 's/ [123].\{1,2\} (1[234] acertos)/\
-/g;' | sed '1d' | sed "s/[0-9] /&${tab}/g" > "${cache}.num"
-				echo '' > "${cache}.val"; echo '' >> "${cache}.val"
-			;;
-		esac
-
-		# Mostra o resultado na tela (caso encontrado algo)
-		if test -n "$resultado"
+		zztool eco "${tipo}:"
+		if ! test -n "$num_con"
 		then
-			zztool eco $tipo:
-			echo "$resultado" | sed 's/^/   /'
-			data=$(echo "$data" | zzdatafmt)
-			echo "   Concurso $numero_concurso ($data)"
-			test -n "$acumulado" && echo "   Acumulado em R$ $acumulado" | sed 's/|/ para /'
-			if test -n "$faixa"
-			then
-				printf %b "\tFaixa\tQtde.\tPrêmio\n" | expand -t 5,17,32
-				paste "${cache}" "${cache}.num" "${cache}.val"| expand -t 5,17,32
-			fi
+			# Resultados mais recentes das loterias selecionadas.
+			case "$tipo" in
+				quina)
+					zztool source "${url}/${tipo}" |
+					sed -n 's/</\t</g;/title_detail/p;/_gji _Uii/p;/class="table"/,/<\/table>/p;/.cumulado/p' |
+					zzxml --untag |
+					zzunescape --html |
+					zztrim |
+					awk 'NR==2{printf "\t" $0 "\n\n"}; NR>=4 && NR<19{for (i=0;i<3;i++) {if (i!=0) printf $0 "\t"; getline}; print}; NR==20{print ""}; NR==1 || NR>19' |
+					sed 's/	 / /' |
+					tr -s '\t'
+				;;
+				megasena)
+					zztool source "${url}/${tipo}" |
+					sed -n 's/</\t</g;/title_detail/p;/_gji _Uii/p;/class="table"/,/<\/table>/p;/.cumulado/p' |
+					zzxml --untag |
+					zzunescape --html |
+					zztrim |
+					awk 'NR==2{printf "\t" $0 "\n\n"}; NR>=4 && NR<15{for (i=0;i<3;i++) {if (i!=0) printf $0 "\t"; getline}; print}; NR==16{print ""}; NR==1 || NR>15' |
+					sed 's/	 / /' |
+					tr -s '\t'
+				;;
+				duplasena)
+					zztool source "${url}/${tipo}" |
+					sed -n 's/</\t</g;/title_detail/p;/ Sorteio/p;/_gji _Uii/p;/class="table"/,/<\/table>/p;/.cumulado/p' |
+					zzxml --untag |
+					zzunescape --html |
+					zztrim |
+					awk '
+						NR==2 || NR==4{printf "\t" $0 "\n\n"}
+						(NR>=7 && NR<23) || (NR>=25 && NR<41) {for (i=0;i<3;i++) {if (i!=0) printf $0 "\t"; getline}; print}
+						NR==5 || NR==23 || NR==41 {print ""}
+						NR==1 || NR==5 || NR==23 || NR==41
+					' |
+					sed 's/	 / /' |
+					tr -s '\t'
+				;;
+				lotomania)
+					zztool source "${url}/${tipo}" |
+					sed -n 's/</\t</g;/title_detail/p;/_gji _Uii/p;/class="table"/,/<\/table>/p;/.cumulado/p' |
+					zzxml --untag |
+					zzunescape --html |
+					zztrim |
+					awk '
+						# NR==2{printf $0 "\n\n"}
+						NR==2{for (i=1;i<=16;i+=5) printf "\t" $i "\t" $(i+1) "\t" $(i+2) "\t" $(i+3) "\t" $(i+4) "\n\n"}
+						NR>=4 && NR<31{for (i=0;i<3;i++) {if (i!=0) printf $0 "\t"; getline}; print}
+						NR==31{print ""}
+						NR==1 || NR>31
+					' |
+					sed 's/	 / /;1,2s/ 	/ /g' |
+					tr -s '\t'
+				;;
+				lotofacil)
+					zztool source "${url}/${tipo}" |
+					sed -n 's/</\t</g;/title_detail/p;/_gji _Uii/p;/class="table"/,/<\/table>/p;/.cumulado/p' |
+					zzxml --untag |
+					zzunescape --html |
+					zztrim |
+					awk '
+						# NR==2{printf $0 "\n\n"}
+						NR==2{for (i=1;i<=11;i+=5) printf "\t" $i "\t" $(i+1) "\t" $(i+2) "\t" $(i+3) "\t" $(i+4) "\n\n"}
+						NR>=4 && NR<23{for (i=0;i<3;i++) {if (i!=0) printf $0 "\t"; getline}; print}
+						NR==24{print ""}
+						NR==1 || NR>23' |
+					sed 's/	 / /' |
+					tr -s '\t'
+				;;
+				timemania)
+					zztool source "${url}/${tipo}" |
+					sed -n 's/</\t</g;/title_detail/p;/_gji _Uii/p;/class="table"/,/<\/table>/p;/.cumulado/p' |
+					zzxml --untag |
+					zzunescape --html |
+					zztrim |
+					awk '
+						NR>1 && NR<=3{printf "\t" $0 "\n\n"}
+						NR>=4 && NR<26{for (i=0;i<3;i++) {if (i>1) printf $0 "\t"; getline}; print}
+						NR==29{print ""}
+						NR==1 || NR>28' |
+					tr -s '\t ' |
+					sed 's/	 / /;4s/:[ 	]*/:/;s/^	Time/Time/;s/Time	/&	/'
+				;;
+				federal)
+					zztool source "${url}/${tipo}" |
+					sed -n 's/</\t</g;/title_detail/p;/quina_text_color/p' |
+					zzxml --untag | zztrim | awk 'NR==3{print ""};NR>7{exit};NR>2 {printf "\t" $0 "\n"}; NR==2' |
+					sed 's/ 	/	/g' |
+					tr -s '\t'
+				;;
+				loteca)
+					if ! test -e ${cache}.loteca.htm || test $(zzdatafmt --iso hoje) != $(tail -n 1 ${cache}.loteca.htm)
+					then
+						wget -q -O "${cache}.loteca.zip" "http://www1.caixa.gov.br/loterias/_arquivos/loterias/d_loteca.zip"
+						$un_zip "${cache}.loteca.zip" "*.HTM" -d "$tmp_dir" 2>/dev/null
+						mv -f "${tmp_dir}/D_LOTECA.HTM" ${cache}.loteca.htm
+						zzdatafmt --iso hoje >> ${cache}.loteca.htm
+						rm -f ${cache}.loteca.zip
+					fi
+					zztool dump ${cache}.loteca.htm |
+					grep -E --color=never '^  *[0-9]+ ' |
+					tail -n 1 |
+					awk '{
+						print "Concurso", $1, "(" $2 ")"
+						print " Jogo   Resultado"
+						printf "  1    %8s\n", "Col. " ($(NF-15)=="x"?"Meio":$(NF-15))
+						printf "  2    %8s\n", "Col. " ($(NF-14)=="x"?"Meio":$(NF-14))
+						printf "  3    %8s\n", "Col. " ($(NF-13)=="x"?"Meio":$(NF-13))
+						printf "  4    %8s\n", "Col. " ($(NF-12)=="x"?"Meio":$(NF-12))
+						printf "  5    %8s\n", "Col. " ($(NF-11)=="x"?"Meio":$(NF-11))
+						printf "  6    %8s\n", "Col. " ($(NF-10)=="x"?"Meio":$(NF-10))
+						printf "  7    %8s\n", "Col. " ($(NF-9)=="x"?"Meio":$(NF-9))
+						printf "  8    %8s\n", "Col. " ($(NF-8)=="x"?"Meio":$(NF-8))
+						printf "  9    %8s\n", "Col. " ($(NF-7)=="x"?"Meio":$(NF-7))
+						printf " 10    %8s\n", "Col. " ($(NF-6)=="x"?"Meio":$(NF-6))
+						printf " 11    %8s\n", "Col. " ($(NF-5)=="x"?"Meio":$(NF-5))
+						printf " 12    %8s\n", "Col. " ($(NF-4)=="x"?"Meio":$(NF-4))
+						printf " 13    %8s\n", "Col. " ($(NF-3)=="x"?"Meio":$(NF-3))
+						printf " 14    %8s\n", "Col. " ($(NF-2)=="x"?"Meio":$(NF-2))
+						print ""
+						printf "  14 pts.\t%s\t%s\n", ($3==0?"Nao houve acertador":$3), ($3==0?"":"R$ " $(NF-21))
+						printf "  13 pts.\t%s\t%s\n", $(NF-18), "R$ " $(NF-17)
+					}'
+				;;
+			esac
+			echo
+		else
+			# Resultados históricos das loterias selecionadas.
+			case "$tipo" in
+				lotomania)
+					if ! test -e ${cache}.lotomania.htm || ! $(zztool dump ${cache}.lotomania.htm | grep "^ *$num_con " >/dev/null)
+					then
+						wget -q -O "${cache}.lotomania.zip" "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_lotoma.zip"
+						$un_zip "${cache}.lotomania.zip" "*.HTM" -d "$tmp_dir" 2>/dev/null
+						mv -f "${tmp_dir}/D_LOTMAN.HTM" ${cache}.lotomania.htm
+						rm -f ${cache}.lotomania.zip
+					fi
+					zztool dump ${cache}.lotomania.htm |
+					if test 0 = "$num_con"
+					then
+						awk '
+						BEGIN { printf "## QTD\t## QTD\t## QTD\t## QTD\n" }
+						$2 ~ /[0-9]\/[0-9][0-9]\/[0-9]/ { for (i=3;i<23;i++) numeros[$i]++ }
+						END {
+							for (i=0;i<25;i++) {
+								num=sprintf("%02d",i)
+								printf "%02d %d\t%02d %d\t%02d %d\t%02d %d\n", i, numeros[num], i+25, numeros[i+25], i+50, numeros[i+50], i+75, numeros[i+75]
+							}
+						}
+						' | expand -t 10
+					else
+						grep "^ *$num_con " 2>/dev/null |
+						tr -d '[A-Z]' |
+						awk ' {
+							print "Concurso", $1, "(" $2 ")"
+							comando="sort -n | paste -d _ - - - - -"
+							for (i=3;i<23;i++) {print $i | comando }
+							close(comando)
+							i=(NF==42?1:0)
+							print ""
+							printf "20 pts.\t%s\t%s\n", ($24==0?"Nao houve acertador!":$24), ($24==0?"":"R$ " $(NF-13+i))
+							printf "19 pts.\t%s\t%s\n", $(NF-18+i), "R$ " $(NF-12+i)
+							printf "18 pts.\t%s\t%s\n", $(NF-17+i), "R$ " $(NF-11+i)
+							printf "17 pts.\t%s\t%s\n", $(NF-16+i), "R$ " $(NF-10+i)
+							printf "16 pts.\t%s\t%s\n", $(NF-15+i), "R$ " $(NF-9+i)
+							printf " 0 pts.\t%s\t%s\n", ($(NF-14+i)==0?"Nao houve acertador!":$(NF-14+i)), ($(NF-14+i)==0?"":"R$ " $(NF-8+i))
+						}' | sed '/^[0-9 ]/s/^/   /;s/_/     /g' | expand -t 5,15,25
+					fi
+				;;
+				lotofacil)
+					if ! test -e ${cache}.lotofacil.htm || ! $(zztool dump ${cache}.lotofacil.htm | grep "^ *$num_con " >/dev/null)
+					then
+						wget -q -O "${cache}.lotofacil.zip" "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_lotfac.zip"
+						$un_zip "${cache}.lotofacil.zip" "*.HTM" -d "$tmp_dir" 2>/dev/null
+						mv -f "${tmp_dir}/D_LOTFAC.HTM" ${cache}.lotofacil.htm
+						rm -f ${cache}.lotofacil.zip
+					fi
+					zztool dump ${cache}.lotofacil.htm |
+					if test 0 = "$num_con"
+					then
+						awk '
+						BEGIN { print "## QTD" }
+						$2 ~ /[0-9]\/[0-9][0-9]\/[0-9]/ { for (i=3;i<18;i++) numeros[$i]++ }
+						END {
+							for (i=1;i<=25;i++) {
+								num=sprintf("%02d",i)
+								printf "%02d %d\n", i, numeros[num]
+							}
+						}
+						' | expand -t 10
+					else
+						grep "^ *$num_con " 2>/dev/null |
+						awk '{
+							print "Concurso", $1, "(" $2 ")"
+							comando="sort -n | paste -d _ - - - - -"
+							for (i=3;i<18;i++) {print $i | comando }
+							close(comando)
+							print ""
+							printf "15 pts.\t%s\t%s\n", ($19==0?"Nao houve acertador!":$19), ($19==0?"":"R$ " $(NF-7))
+							printf "14 pts.\t%s\t%s\n", $(NF-11), "R$ " $(NF-6)
+							printf "13 pts.\t%s\t%s\n", $(NF-10), "R$ " $(NF-5)
+							printf "12 pts.\t%s\t%s\n", $(NF-9), "R$ " $(NF-4)
+							printf "11 pts.\t%s\t%s\n", $(NF-8), "R$ " $(NF-3)
+						}' | sed '/^[0-9 ]/s/^/   /;s/_/     /g' | expand -t 5,15,25
+					fi
+				;;
+				megasena)
+					if ! test -e ${cache}.mega.htm || ! $(zztool dump ${cache}.megasena.htm | grep "^ *$num_con " >/dev/null)
+					then
+						wget -q -O "${cache}.megasena.zip" "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_mgsasc.zip"
+						$un_zip "${cache}.megasena.zip" "*.htm" -d "$tmp_dir" 2>/dev/null
+						mv -f "${tmp_dir}/d_megasc.htm" ${cache}.megasena.htm
+						rm -f ${cache}.megasena.zip
+					fi
+					zztool dump ${cache}.megasena.htm |
+					if test 0 = "$num_con"
+					then
+						awk '
+						BEGIN { printf "## QTD\t## QTD\t## QTD\n" }
+						$2 ~ /[0-9]\/[0-9][0-9]\/[0-9]/ { for (i=3;i<9;i++) numeros[$i]++ }
+						END {
+							for (i=1;i<=20;i++) {
+								num=sprintf("%02d",i)
+								printf "%02d %d\t%02d %d\t%02d %d\n", i, numeros[num], i+20, numeros[i+20], i+40, numeros[i+40]
+							}
+						}
+						' | expand -t 10
+					else
+						grep "^ *$num_con " 2>/dev/null |
+						awk '{
+							print "Concurso", $1, "(" $2 ")"
+							printf "%4s %4s %4s %4s %4s %4s\n", $3, $4, $5, $6, $7, $8
+							print ""
+							printf "   Sena  \t%s\t%s\n", ($10==0?"Nao houve acertador!":$10), ($10==0?"":"R$ " $(NF-8))
+							printf "   Quina \t%s\t%s\n", $(NF-7), "R$ " $(NF-6)
+							printf "   Quadra\t%s\t%s\n", $(NF-5), "R$ " $(NF-4)
+						}' | expand -t 15,25,35
+					fi
+				;;
+				duplasena)
+					if ! test -e ${cache}.duplasena.htm || ! $(zztool dump ${cache}.duplasena.htm | grep "^ *$num_con " >/dev/null)
+					then
+						wget -q -O "${cache}.duplasena.zip" "http://www1.caixa.gov.br/loterias/_arquivos/loterias/d_dplsen.zip"
+						$un_zip "${cache}.duplasena.zip" "*.HTM" -d "$tmp_dir" 2>/dev/null
+						mv -f "${tmp_dir}/D_DPLSEN.HTM" ${cache}.duplasena.htm
+						rm -f ${cache}.duplasena.zip
+					fi
+					zztool dump ${cache}.duplasena.htm |
+					if test 0 = "$num_con"
+					then
+						awk '
+						BEGIN {
+							printf "1º sorteio          2º sorteio\n"
+							printf "## QTD\t## QTD\t## QTD\t## QTD\n"
+							}
+						$2 ~ /[0-9]\/[0-9][0-9]\/[0-9]/ {
+							for (i=3;i<9;i++)  numeros1[$i]++
+							for (i=15;i>9;i--) numeros2[$(NF-i) ]++
+						}
+						END {
+							for (i=1;i<=25;i++) {
+								num=sprintf("%02d",i)
+								printf "%02d %d\t%02d %d\t%02d %d\t%02d %d\n", i, numeros1[num], i+25, numeros1[i+25], i, numeros2[num], i+25, numeros2[i+25]
+							}
+						}
+						' | expand -t 10
+					else
+						grep "^ *$num_con " 2>/dev/null |
+						awk '{
+							print "Concurso", $1, "(" $2 ")"
+							printf "\n  1º sorteio\n"
+							comando="sort -n | paste -d _ - - - - - -"
+							for (i=3;i<9;i++) {print $i | comando }
+							close(comando)
+							printf "\n  2º sorteio\n"
+							for (i=15;i>9;i--) {print $(NF-i) | comando }
+							close(comando)
+							printf "\n  1º Sorteio\n"
+							printf "   Sena  \t%s\t%s\n", ($10==0?"Nao houve acertador":$10), ($10==0?"":"R$ " $(NF-22))
+							printf "   Quina \t%s\t%s\n", $(NF-21), "R$ " $(NF-20)
+							printf "   Quadra\t%s\t%s\n", $(NF-19), "R$ " $(NF-19)
+							printf "\n  2º Sorteio\n"
+							printf "   Sena  \t%s\t%s\n", ($(NF-9)==0?"Nao houve acertador":$(NF-9)), ($(NF-9)==0?"":"R$ " $(NF-8))
+							printf "   Quina \t%s\t%s\n", $(NF-7), "R$ " $(NF-6)
+							printf "   Quadra\t%s\t%s\n", $(NF-5), "R$ " $(NF-4)
+						}' | sed '/^[0-9][0-9]/s/^/   /;s/_/   /g'
+					fi
+				;;
+				quina)
+					if ! test -e ${cache}.quina.htm || ! $(zztool dump ${cache}.quina.htm | grep "^ *$num_con " >/dev/null)
+					then
+						wget -q -O "${cache}.quina.zip" "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_quina.zip"
+						$un_zip "${cache}.quina.zip" "*.HTM" -d "$tmp_dir" 2>/dev/null
+						mv -f "${tmp_dir}/D_QUINA.HTM" ${cache}.quina.htm
+						rm -f ${cache}.quina.zip
+					fi
+					zztool dump ${cache}.quina.htm |
+					if test 0 = "$num_con"
+					then
+						awk '
+						BEGIN { printf "## QTD\t## QTD\t## QTD\t## QTD\n" }
+						$2 ~ /[0-9]\/[0-9][0-9]\/[0-9]/ { for (i=3;i<8;i++) numeros[$i]++ }
+						END {
+							for (i=1;i<=20;i++) {
+								num=sprintf("%02d",i)
+								printf "%02d %d\t%02d %d\t%02d %d\t%02d %d\n", i, numeros[num], i+20, numeros[i+20], i+40, numeros[i+40], i+60, numeros[i+60]
+							}
+						}
+						' | expand -t 10
+					else
+						grep "^ *$num_con " 2>/dev/null |
+						awk '{
+							print "Concurso", $1, "(" $2 ")"
+							comando="sort -n | paste -d _ - - - - -"
+							for (i=3;i<8;i++) {print $i | comando }
+							close(comando)
+							print ""
+							printf "   Quina \t%s\t%s\n", ($9==0?"Nao houve acertador":$9), ($9==0?"":"R$ " $(NF-10))
+							printf "   Quadra\t%s\t%s\n", $(NF-9), "R$ " $(NF-8)
+							printf "   Terno \t%s\t%s\n", $(NF-7), "R$ " $(NF-6)
+						}' | sed '/^[0-9][0-9]/s/^/   /;s/_/   /g' | expand -t 15,25,35
+					fi
+				;;
+				federal)
+					if test 0 = "$num_con"
+					then
+						zztool erro "Não se aplica a loteria federal."
+						return 1
+					fi
+
+					if ! test -e ${cache}.federal.htm || ! $(zztool dump ${cache}.federal.htm | grep "^[ 0]*$num_con " >/dev/null)
+					then
+						wget -q -O "${cache}.federal.zip" "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_federa.zip"
+						$un_zip "${cache}.federal.zip" "*.HTM" -d "$tmp_dir" 2>/dev/null
+						mv -f "${tmp_dir}/D_LOTFED.HTM" ${cache}.federal.htm
+						rm -f ${cache}.federal.zip
+					fi
+					zztool dump ${cache}.federal.htm |
+					grep "^[ 0]*$num_con " 2>/dev/null |
+					awk '{
+						print "Concurso", $1, "(" $2 ")"
+						print ""
+						printf "   1º Premio     %s   %s\n", $3, "R$ " $8
+						printf "   2º Premio     %s   %s\n", $4, "R$ " $9
+						printf "   3º Premio     %s   %s\n", $5, "R$ " $10
+						printf "   4º Premio     %s   %s\n", $6, "R$ " $11
+						printf "   5º Premio     %s   %s\n", $7, "R$ " $12
+					}'
+				;;
+				timemania)
+					if ! test -e ${cache}.timemania.htm || ! $(zztool dump ${cache}.timemania.htm | grep "^ *$num_con " >/dev/null)
+					then
+						wget -q -O "${cache}.timemania.zip" "http://www1.caixa.gov.br/loterias/_arquivos/loterias/D_timasc.zip"
+						$un_zip "${cache}.timemania.zip" "*.HTM" -d "$tmp_dir" 2>/dev/null
+						mv -f "${tmp_dir}/D_TIMASC.HTM" ${cache}.timemania.htm
+						rm -f ${cache}.timemania.zip
+					fi
+					zztool dump ${cache}.timemania.htm |
+					if test 0 = "$num_con"
+					then
+						awk '
+						BEGIN { printf "## QTD\t## QTD\t## QTD\t## QTD\n" }
+						$2 ~ /[0-9]\/[0-9][0-9]\/[0-9]/ { for (i=3;i<10;i++) numeros[$i]++ }
+						END {
+							for (i=1;i<=20;i++) {
+								num=sprintf("%02d",i)
+								printf "%02d %d\t%02d %d\t%02d %d\t%02d %d\n", i, numeros[num], i+20, numeros[i+20], i+40, numeros[i+40], i+60, numeros[i+60]
+							}
+						}
+						' | expand -t 10
+					else
+						grep "^ *$num_con " 2>/dev/null |
+						sed 's/\([[:upper:]]\) \([[:upper:]]\)/\1_\2/g' |
+						awk '{
+							print "Concurso", $1, "(" $2 ")"
+							printf "%5s %4s %4s %4s %4s %4s %4s\n", $3, $4, $5, $6, $7, $8, $9
+							print ""
+							printf "   7 pts.\t%s\t%s\n", ($12==0?"Nao houve acertador!":$12), ($12==0?"":"R$ " $(NF-7))
+							printf "   6 pts.\t%s\t%s\n", $(NF-12), "R$ " $(NF-6)
+							printf "   5 pts.\t%s\t%s\n", $(NF-11), "R$ " $(NF-5)
+							printf "   4 pts.\t%s\t%s\n", $(NF-10), "R$ " $(NF-4)
+							printf "   3 pts.\t%s\t%s\n", $(NF-9), "R$ " $(NF-3)
+							printf "\n   Time: %s\t\n\t%s\t%s\n", $10, $(NF-8),  "R$ " $(NF-2)
+						}' | expand -t 15,25,35
+					fi
+				;;
+				loteca)
+					if test 0 = "$num_con"
+					then
+						zztool erro "Não se aplica a loteca."
+						return 1
+					fi
+
+					if ! test -e ${cache}.loteca.htm || ! $(zztool dump ${cache}.loteca.htm | grep "^ *$num_con " >/dev/null)
+					then
+						wget -q -O "${cache}.loteca.zip" "http://www1.caixa.gov.br/loterias/_arquivos/loterias/d_loteca.zip"
+						$un_zip "${cache}.loteca.zip" "*.HTM" -d "$tmp_dir"
+						mv -f "${tmp_dir}/D_LOTECA.HTM" ${cache}.loteca.htm
+						zzdatafmt --iso hoje >> ${cache}.loteca.htm
+						rm -f ${cache}.loteca.zip
+					fi
+					zztool dump ${cache}.loteca.htm |
+					grep "^ *$num_con " 2>/dev/null |
+					awk '{
+						print "Concurso", $1, "(" $2 ")"
+						print " Jogo   Resultado"
+						printf "  1    %8s\n", "Col. " ($(NF-15)=="x"?"Meio":$(NF-15))
+						printf "  2    %8s\n", "Col. " ($(NF-14)=="x"?"Meio":$(NF-14))
+						printf "  3    %8s\n", "Col. " ($(NF-13)=="x"?"Meio":$(NF-13))
+						printf "  4    %8s\n", "Col. " ($(NF-12)=="x"?"Meio":$(NF-12))
+						printf "  5    %8s\n", "Col. " ($(NF-11)=="x"?"Meio":$(NF-11))
+						printf "  6    %8s\n", "Col. " ($(NF-10)=="x"?"Meio":$(NF-10))
+						printf "  7    %8s\n", "Col. " ($(NF-9)=="x"?"Meio":$(NF-9))
+						printf "  8    %8s\n", "Col. " ($(NF-8)=="x"?"Meio":$(NF-8))
+						printf "  9    %8s\n", "Col. " ($(NF-7)=="x"?"Meio":$(NF-7))
+						printf " 10    %8s\n", "Col. " ($(NF-6)=="x"?"Meio":$(NF-6))
+						printf " 11    %8s\n", "Col. " ($(NF-5)=="x"?"Meio":$(NF-5))
+						printf " 12    %8s\n", "Col. " ($(NF-4)=="x"?"Meio":$(NF-4))
+						printf " 13    %8s\n", "Col. " ($(NF-3)=="x"?"Meio":$(NF-3))
+						printf " 14    %8s\n", "Col. " ($(NF-2)=="x"?"Meio":$(NF-2))
+						print ""
+						printf "  14 pts.\t%s\t%s\n", ($3==0?"Nao houve acertador":$3), ($3==0?"":"R$ " $(NF-21))
+						printf "  13 pts.\t%s\t%s\n", $(NF-18), "R$ " $(NF-17)
+					}'
+				;;
+			esac
 			echo
 		fi
 	done
@@ -10462,7 +11085,13 @@ zzlua ()
 	# Se o cache está vazio, baixa listagem da Internet
 	if ! test -s "$cache"
 	then
-		$ZZWWWDUMP "$url" | sed -n '/^4.1/,/^ *6/p' | sed '/^ *[4-6]/,/^ *__*$/{/^ *__*$/!d;}' > "$cache"
+		zztool dump "$url" |
+		awk '
+				$0  ~ /^$/  { branco++; if (branco == 3) { print "----------"; branco = 0 } }
+				$0 !~ /^$/  { for (i=1;i<=branco;i++) { print "" }; print ; branco = 0 }
+			' |
+		sed -n '/^ *4\.1/,/^ *6/p' |
+		sed '/^ *[4-6]/,/^ *[_-][_-][_-][_-]*$/{/^ *[_-][_-][_-][_-]*$/!d;}' > "$cache"
 	fi
 
 	if test "$1" = '-d' -o "$1" = '--detalhe'
@@ -10470,19 +11099,76 @@ zzlua ()
 		# Detalhe de uma função específica
 		if test -n "$2"
 		then
-			sed -n "/  $2/,/^ *__*$/p" "$cache" | sed '/^ *__*$/d'
+			sed -n "/  *$2/,/^ *[_-][_-][_-][_-]*$/p" "$cache" |
+			sed '/^ *[_-][_-][_-][_-]*$/d' | sed '$ { /^ *$/ d; }'
 		fi
 	elif test -n "$padrao"
 	then
 		# Busca a(s) função(ões)
-		sed -n '/^ *__*$/,/^ *[a-z_]/p' "$cache" |
-		sed '/^ *__*$/d;/^ *$/d;s/^  //g;s/\([^ ]\) .*$/\1/g' |
+		sed -n '/^ *[_-][_-][_-][_-]*$/,/^ *[a-z_]/p' "$cache" |
+		sed '/^ *[_-][_-][_-][_-]*$/d;/^ *$/d;s/^  //g;s/\([^ ]\) .*$/\1/g' |
 		grep -h -i -- "$padrao"
 	else
 		# Lista todas as funções
-		sed -n '/^ *__*$/,/^ *[a-z_]/p' "$cache" |
-		sed '/^ *__*$/d;/^ *$/d;s/\([^ ]\) .*$/\1/g'
+		sed -n '/^ *[_-][_-][_-][_-]*$/,/^ *[a-z_]/p' "$cache" |
+		sed '/^ *[_-][_-][_-][_-]*$/d;/^ *$/d;s/\([^ ]\) .*$/\1/g'
 	fi
+}
+
+# ----------------------------------------------------------------------------
+# zzmacvendor
+# Mostra o fabricante do equipamento utilizando o endereço MAC.
+#
+# Uso: zzmacvendor <MAC Address>
+# Ex.: zzmacvendor 88:5A:92:C7:41:40
+#      zzmacvendor 88-5A-92-C7-41-40
+#
+# Autor: Rafael S. Guimaraes, www.rafaelguimaraes.net
+# Desde: 2016-02-03
+# Versão: 3
+# Licença: GPL
+# Requisitos: zztestar zzcut zzdominiopais
+# ----------------------------------------------------------------------------
+zzmacvendor ()
+{
+	zzzz -h macvendor "$1" && return
+
+	# Verificação dos parâmetros
+	test -n "$1" || { zztool -e uso macvendor; return 1; }
+
+	local mac="$1"
+	local fab end pais linha
+
+	# Validação
+	zztestar -e mac "$mac" || return 1
+
+	mac=$(echo "$mac"  | tr -d ':-')
+
+	local url="https://macvendors.co/api/$mac/pipe"
+	zztool source "$url" |
+	tr -s ' "' '  ' |
+	zzcut -f 1,3,6 -d "|" | tr '|' '\n' |
+	sed '2{s/,[^,]*$//;}' |
+	while read linha
+	do
+		if test -z "$fab"
+		then
+			fab="$linha"
+			echo 'Fabricante:' $fab
+			continue
+		fi
+		if test -z "$end"
+		then
+			end="$linha"
+			echo 'Endereço:  ' $end
+			continue
+		fi
+		if test -z "$pais"
+		then
+			pais="$linha"
+			echo 'País:      ' $(zzdominiopais ".$pais" | sed 's/.*- //')
+		fi
+	done
 }
 
 # ----------------------------------------------------------------------------
@@ -10630,7 +11316,7 @@ zzmaiusculas ()
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-07-03
-# Versão: 3
+# Versão: 4
 # Licença: GPL
 # Requisitos: zzminusculas zzsemacento zztrim
 # ----------------------------------------------------------------------------
@@ -10650,22 +11336,41 @@ zzmariadb ()
 
 	if ! test -s "$cache"
 	then
-		$ZZWWWDUMP "${url}/mariadb-brazilian-portuguese" |
-		sed -n '/^[A-Z]\{4,\}/p' |
-		awk '{print NR, $0}'> $cache
+		zztool dump "${url}/mariadb-brazilian-portuguese/" |
+			sed -n '/^\( *\* \)\{0,1\}[A-Z]\{4,\}/p' |
+			sed 's/  *\* *//' |
+			awk '{print NR, $0}'> "$cache"
 	fi
 
 	if test -n "$1"
 	then
-		if zztool testa_numero $1
+		if zztool testa_numero "$1"
 		then
-			comando=$(sed -n "${1}p" $cache | sed "s/^${1} //;s| / |-|g;s/ - /-/g;s/ /-/g;s/\.//g" | zzminusculas | zzsemacento)
-			$ZZWWWDUMP "${url}/${comando}" |
-			sed -n '/^Localized Versions/,/* ←/p' |
-			sed '1d;2d;/^  *\*.*\]$/d;/^ *Tweet */d;/^ *\* *$/d;$d' |
-			zztrim -V
+			comando=$(
+				sed -n "${1}p" "$cache" |
+					sed "
+						s/^${1} //
+						s| / |-|g
+						s/ - /-/g
+						s/ /-/g
+						s/\.//g
+					" |
+					zzminusculas |
+					zzsemacento
+			)
+			zztool dump "${url}/${comando}/" |
+				sed -n '/^ *Localized Versions/,/\* ←/ p' |
+				sed '
+					1d
+					2d
+					/^  *\*.*\]$/d
+					/^ *Tweet */d
+					/^ *\* *$/d
+					$d
+				' |
+				zztrim -V
 		else
-			grep -i $1 $cache
+			grep -i "$1" "$cache"
 		fi
 	else
 		cat "$cache"
@@ -10681,23 +11386,24 @@ zzmariadb ()
 # pois ficou muito extenso colocar no help do zzmat apenas.
 #
 # Funções matemáticas disponíveis.
-# Aritméticas:                     Trigonométricas:
-#  mmc mdc                          sen cos tan
-#  somatoria produtoria             csc sec cot
-#  media soma produto               asen acos atan
-#  log ln
-#  raiz, pow, potencia ou elevado
+# Aritméticas:               | Trigonométricas:
+#  mmc    mdc                |  sen   cos   tan
+#  media  soma  produto      |  csc   sec   cot
+#  log    ln    raiz         |  asen  acos  atan
+#  somatoria    produtoria
+#  pow, potencia ou elevado
 #
-# Combinatória:             Sequências:          Funções:
-#  fat                       pa pa2 pg lucas      area volume r3
-#  arranjo arranjo_r         fibonacci ou fib     det vetor d2p
-#  combinacao combinacao_r   tribonacci ou trib
+# Combinatória:        | Sequências:          | Funções:
+#  fat                 |  pa  pa2  pg  lucas  |  area  volume  r3
+#  arranjo  arranjo_r  |  fibonacci  ou fib   |  det   vetor   d2p
+#  combinacao          |  tribonacci ou trib
+#  combinacao_r        |  mersenne  recaman  collatz
 #
-# Equações:                  Auxiliares:
-#  eq2g egr err                converte
-#  egc egc3p ege               abs int sem_zeros
-#  newton ou binomio_newton    aleatorio random
-#  conf_eq                     compara_num
+# Equações:                  | Auxiliares:
+#  eq2g  egr    err          |  abs  int
+#  egc   egc3p  ege          |  sem_zeros
+#  newton ou binomio_newton  |  aleatorio  random
+#  conf_eq                   |  compara_num
 #
 # Mais detalhes: zzmat função
 #
@@ -10709,9 +11415,9 @@ zzmariadb ()
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2011-01-19
-# Versão: 19
+# Versão: 23
 # Licença: GPL
-# Requisitos: zzcalcula zzseq zzaleatorio zztrim
+# Requisitos: zzcalcula zzseq zzaleatorio zztrim zzconverte zztestar
 # ----------------------------------------------------------------------------
 zzmat ()
 {
@@ -10729,7 +11435,7 @@ zzmat ()
 	if test "$?" = "0"
 	then
 		precisao="${1#-p}"
-		zztool testa_numero $precisao || precisao="6"
+		zztestar numero $precisao || precisao="6"
 		shift
 	else
 		precisao="6"
@@ -10738,40 +11444,17 @@ zzmat ()
 	funcao="$1"
 
 	# Atalhos para funções pow e fat, usando operadores unários
-	if zztool grep_var '^' "$funcao" && zzmat testa_num "${funcao%^*}" && zzmat testa_num "${funcao#*^}"
+	if zztool grep_var '^' "$funcao" && zztestar numero_real "${funcao%^*}" && zztestar numero_real "${funcao#*^}"
 	then
 		zzmat -p${precisao} pow "${funcao%^*}" "${funcao#*^}"
 		return
-	elif zztool grep_var '!' "$funcao" && zztool testa_numero "${funcao%\!}"
+	elif zztool grep_var '!' "$funcao" && zztestar numero "${funcao%\!}"
 	then
 		zzmat -p${precisao} fat "${funcao%\!}" $2
 		return
 	fi
 
 	case "$funcao" in
-	testa_num)
-		# Testa se $2 é um número não coberto pela zztool testa_numero*
-		echo "$2" | sed 's/^-[\.,]/-0\./;s/^[\.,]/0\./' |
-		grep '^[+-]\{0,1\}[0-9]\{1,\}[,.]\{0,1\}[0-9]*$' >/dev/null
-	;;
-	testa_num_exp)
-		local num1 num2 num3
-		echo "$2" | grep -E '(e|E)' >/dev/null
-		if test $? -eq 0
-		then
-			num3=$(echo "$2" | tr 'E,' 'e.')
-			num1=${num3%e*}
-			num2=${num3#*e}
-			if zzmat testa_num $num1 && zztool testa_numero_sinal $num2 2>/dev/null 1>/dev/null
-			then
-				return 0
-			else
-				return 1
-			fi
-		else
-			return 1
-		fi
-	;;
 	sem_zeros)
 		# Elimina o zeros nao significativos
 		local num1
@@ -10790,18 +11473,17 @@ zzmat ()
 		echo "$num1"
 	;;
 	compara_num)
-		if (test $# -eq "3" && zzmat testa_num $2 && zzmat testa_num $3)
+		if test $# -eq "3" && zztestar numero_real $2 && zztestar numero_real $3
 		then
-			local num1 num2 retorno
+			local num1 num2
 			num1=$(echo "$2" | tr ',' '.')
 			num2=$(echo "$3" | tr ',' '.')
-			retorno=$(
-			awk 'BEGIN {
-				if ('$num1' > '$num2') {print "maior"}
-				if ('$num1' == '$num2') {print "igual"}
-				if ('$num1' < '$num2') {print "menor"}
-			}')
-			echo "$retorno"
+			echo "$num1 $num2" |
+			awk '
+				$1 > $2  { print "maior" }
+				$1 == $2 { print "igual" }
+				$1 < $2  { print "menor" }
+			'
 		else
 			zztool erro " zzmat $funcao: Compara 2 numeros"
 			zztool erro " Retorna o texto 'maior', 'menor' ou 'igual'"
@@ -10820,7 +11502,7 @@ zzmat ()
 		fi
 		shift
 		num1=$(zztool multi_stdin "$@" | tr ',' '.')
-		if zzmat testa_num $num1
+		if zztestar numero_real $num1
 		then
 			echo $num1 | sed 's/\..*$//'
 		fi
@@ -10836,102 +11518,37 @@ zzmat ()
 		fi
 		shift
 		num1=$(zztool multi_stdin "$@" | tr ',' '.')
-		if zzmat testa_num $num1
+		if zztestar numero_real $num1
 		then
 			echo "$num1" | sed 's/^[-+]//'
 		fi
 	;;
-	converte)
-		if (test $# -eq "3" && zzmat testa_num $3)
-		then
-			local num1
-			num1=$(echo "$3" | tr ',' '.')
-			case $2 in
-			gr) num="$num1*$pi/180";;
-			rg) num="$num1*180/$pi";;
-			dr) num="$num1*$pi/200";;
-			rd) num="$num1*200/$pi";;
-			dg) num="$num1*0.9";;
-			gd) num="$num1/0.9";;
-			??)
-				local grandeza1 grandeza2 fator divisor potencia letra
-				local grandezas="y z a f p n u m c d 1 D H K M G T P E Z Y"
-				local potencias="-24 -21 -18 -15 -12 -9 -6 -3 -2 -1 0 1 2 3 6 9 12 15 18 21 24"
-				local posicao='1'
-
-				precisao=24
-				grandeza1=$(echo "$2" | sed 's/\([[:alpha:]1]\)[[:alpha:]1]/\1/')
-				grandeza2=$(echo "$2" | sed 's/[[:alpha:]1]\([[:alpha:]1]\)/\1/')
-				if (test "$grandeza1" != "$grandeza2")
-				then
-					for letra in $(echo "$grandezas")
-					do
-						potencia=$(echo "$potencias" | awk '{print $'$posicao'}')
-						test "$grandeza1" = "$letra" && fator=$potencia
-						test "$grandeza2" = "$letra" && divisor=$potencia
-						posicao=$((posicao + 1))
-					done
-					if (test -n "$fator" && test -n "$divisor")
-					then
-						precisao=$(zzmat abs $(($fator - $divisor)))
-						potencia=$(echo "$precisao" | awk '{printf 1;for (i=1;i<=$1;i++) {printf 0 }}')
-						case $(zzmat compara_num 0 $(($fator - $divisor))) in
-							'menor') letra='*';;
-							'maior') letra='/';;
-						esac
-						echo "scale=$precisao;${num1} ${letra} ${potencia}" | bc -l |
-						awk '{printf "%.'${precisao}'f\n", $1}' |
-						zzmat -p${precisao} sem_zeros
-					fi
-				fi
-			;;
-			esac
-		else
-			zztool erro " zzmat $funcao: Conversões de unidades (não contempladas no zzconverte)"
-			zztool erro " Sub-funções:
-	gr: graus para radiano
-	rg: radiano para graus
-	dr: grado para radiano
-	rd: radiano para grado
-	dg: grado para graus
-	gd: graus para grado
-	ou com os pares do Sistema Internacional de Unidade
-	(y z a f p n u m c d 1 D H K M G T P E Z Y)
-	usando a combição dessa letras em pares, sendo na ordem 'de' 'para'.
-	Obs: o 1 no centro representa a unidade de medida que não possui prefixo.
-	Atenção: Dependendo do computador, arquitetura e a precisao do sistema
-			podem haver distorções em valores muito distantes entre si.
-	Exempo: Kd converte de Kilo para deci."
-			zztool erro " Uso: zzmat $funcao sub-função número"
-			return 1
-		fi
-	;;
 	sen | cos | tan | csc | sec | cot)
-		if (test $# -eq "2")
+		if test $# -eq "2"
 		then
 			local num1 num2 ang
 			num1=$(echo "$2" | sed 's/g$//; s/gr$//; s/rad$//' | tr , .)
-			ang=${2#$num1}
+			ang=$(echo "$2" | tr -d -c '[grad]')
 			echo "$2" | grep -E '(g|rad|gr)$' >/dev/null
-			if (test "$?" -eq "0" && zzmat testa_num $num1)
+			if test "$?" -eq "0" && zztestar numero_real $num1
 			then
 				case $ang in
-				g)   num2=$(zzmat converte gr $num1);;
-				gr)  num2=$(zzmat converte dr $num1);;
+				g)   num2=$(zzconverte -p$((precisao+2)) gr $num1);;
+				gr)  num2=$(zzconverte -p$((precisao+2)) ar $num1);;
 				rad) num2=$num1;;
 				esac
 
 				case $funcao in
-				sen) num1=$(awk 'BEGIN {printf "%.'${precisao}'f\n", sin('$num2')}');;
-				cos) num1=$(awk 'BEGIN {printf "%.'${precisao}'f\n", cos('$num2')}');;
+				sen) num1="scale=${precisao};s(${num2})" ;;
+				cos) num1="scale=${precisao};c(${num2})" ;;
 				tan)
-					num1=$(awk 'BEGIN {div=sprintf("%.6f", cos('$num2'));if (div!="0.000000") printf "%.'${precisao}'f\n", sin('$num2')/cos('$num2');}');;
+					num1="scale=${precisao};if (c(${num2})) {s(${num2})/c(${num2})}" ;;
 				sec)
-					num1=$(awk 'BEGIN {div=sprintf("%.6f", cos('$num2'));if (div!="0.000000") printf "%.'${precisao}'f\n", 1/cos('$num2');}');;
+					num1="scale=${precisao};if (c(${num2})) {1/c(${num2})}" ;;
 				csc)
-					num1=$(awk 'BEGIN {div=sprintf("%.6f", sin('$num2'));if (div!="0.000000") printf "%.'${precisao}'f\n", 1/sin('$num2');}');;
+					num1="scale=${precisao};if (s(${num2})) {1/s(${num2})}" ;;
 				cot)
-					num1=$(awk 'BEGIN {div=sprintf("%.6f", sin('$num2'));if (div!="0.000000") printf "%.'${precisao}'f\n", cos('$num2')/sin('$num2');}');;
+					num1="scale=${precisao};if (s(${num2})) {c(${num2})/s(${num2})}" ;;
 				esac
 
 				test -n "$num1" && num="$num1"
@@ -10951,7 +11568,7 @@ zzmat ()
 		fi
 	;;
 	asen | acos | atan)
-		if test $# -ge "2" && test $# -le "4" && zzmat testa_num $2
+		if test $# -ge "2" && test $# -le "4" && zztestar numero_real $2
 		then
 			local num1 num2 num3 sinal
 			num1=$(echo "$2" | tr ',' '.')
@@ -10997,8 +11614,8 @@ zzmat ()
 			echo "$4" | grep 'r' >/dev/null && num2=$(echo "($num2)-2*($pi)" | bc -l)
 
 			case $3 in
-			g)        num=$(zzmat converte rg $num2);;
-			gr)       num=$(zzmat converte rd $num2);;
+			g)        num=$(zzconverte -p$((precisao+2)) rg $num2);;
+			gr)       num=$(zzconverte -p$((precisao+2)) ra $num2);;
 			rad | "") num="$num2";;
 			esac
 		else
@@ -11017,11 +11634,11 @@ zzmat ()
 		fi
 	;;
 	log | ln)
-		if (test $# -ge "2" && test $# -le "3" && zzmat testa_num $2)
+		if test $# -ge "2" && test $# -le "3" && zztestar numero_real $2
 		then
 			local num1 num2
 			num1=$(echo "$2" | tr ',' '.')
-			zzmat testa_num "$3" && num2=$(echo "$3" | tr ',' '.')
+			zztestar numero_real "$3" && num2=$(echo "$3" | tr ',' '.')
 			if test -n "$num2"
 			then
 				num="l($num1)/l($num2)"
@@ -11040,7 +11657,7 @@ zzmat ()
 		fi
 	;;
 	raiz)
-		if (test $# -eq "3" && zzmat testa_num "$3")
+		if test $# -eq "3" && zztestar numero_real "$3"
 		then
 			local num1 num2
 			case "$2" in
@@ -11057,7 +11674,7 @@ zzmat ()
 					return 1
 				fi
 			fi
-			if zzmat testa_num $num1
+			if zztestar numero_real $num1
 			then
 				num=$(awk 'BEGIN {printf "%.'${precisao}'f\n", '$num2'^(1/'$num1')}')
 			else
@@ -11070,12 +11687,12 @@ zzmat ()
 		fi
 	;;
 	potencia | elevado | pow)
-		if (test $# -eq "3" && zzmat testa_num "$2" && zzmat testa_num "$3")
+		if test $# -eq "3" && zztestar numero_real "$2" && zztestar numero_real "$3"
 		then
 			local num1 num2
 			num1=$(echo "$2" | tr ',' '.')
 			num2=$(echo "$3" | tr ',' '.')
-			if zztool testa_numero $num2
+			if zztestar numero $num2
 			then
 				num=$(echo "scale=${precisao};${num1}^${num2}" | bc -l | awk '{ printf "%.'${precisao}'f\n", $1 }')
 			else
@@ -11091,12 +11708,12 @@ zzmat ()
 		fi
 	;;
 	area)
-		if (test $# -ge "2")
+		if test $# -ge "2"
 		then
 			local num1 num2 num3
 			case "$2" in
 			triangulo)
-				if(zzmat testa_num $3 && zzmat testa_num $4)
+				if zztestar numero_real $3 && zztestar numero_real $4
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11106,7 +11723,7 @@ zzmat ()
 				fi
 			;;
 			retangulo | losango)
-				if(zzmat testa_num $3 && zzmat testa_num $4)
+				if zztestar numero_real $3 && zztestar numero_real $4
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11118,7 +11735,7 @@ zzmat ()
 				fi
 			;;
 			trapezio)
-				if(zzmat testa_num $3 && zzmat testa_num $4 && zzmat testa_num $5)
+				if zztestar numero_real $3 && zztestar numero_real $4 && zztestar numero_real $5
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11129,7 +11746,7 @@ zzmat ()
 				fi
 			;;
 			toro)
-				if(zzmat testa_num $3 && zzmat testa_num $4 && test $(zzmat compara_num $3 $4) != "igual")
+				if zztestar numero_real $3 && zztestar numero_real $4 && test $(zzmat compara_num $3 $4) != "igual"
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11139,9 +11756,9 @@ zzmat ()
 				fi
 			;;
 			tetraedro | cubo | octaedro | dodecaedro | icosaedro | quadrado | circulo | esfera | cuboctaedro | rombicuboctaedro | rombicosidodecaedro | icosidodecaedro)
-				if (test -n "$3")
+				if test -n "$3"
 				then
-					if(zzmat testa_num $3)
+					if zztestar numero_real $3
 					then
 						num1=$(echo "$3" | tr ',' '.')
 						case $2 in
@@ -11158,7 +11775,7 @@ zzmat ()
 						icosidodecaedro)     num="(5*sqrt(3)+3*sqrt(5)*sqrt(5+2*sqrt(5)))*${num1}^2";;
 						rombicosidodecaedro) num="(30+sqrt(30*(10+3*sqrt(5)+sqrt(15*(2+2*sqrt(5))))))*${num1}^2";;
 						esac
-					elif (test $3 = "truncado" && zzmat testa_num $4)
+					elif test $3 = "truncado" && zztestar numero_real $4
 					then
 						num1=$(echo "$4" | tr ',' '.')
 						case $2 in
@@ -11170,7 +11787,7 @@ zzmat ()
 						cuboctaedro)     num="12*(2+sqrt(2)+sqrt(3))*${num1}^2";;
 						icosidodecaedro) num="30*(1+sqrt(2*sqrt(4+sqrt(5)+sqrt(15+6*sqrt(6)))))*${num1}^2";;
 						esac
-					elif (test $3 = "snub" && zzmat testa_num $4)
+					elif test $3 = "snub" && zztestar numero_real $4
 					then
 						num1=$(echo "$4" | tr ',' '.')
 						case $2 in
@@ -11196,12 +11813,12 @@ zzmat ()
 		fi
 	;;
 	volume)
-		if (test $# -ge "2")
+		if test $# -ge "2"
 		then
 			local num1 num2 num3
 			case "$2" in
 			paralelepipedo)
-				if(zzmat testa_num $3 && zzmat testa_num $4 && zzmat testa_num $5)
+				if zztestar numero_real $3 && zztestar numero_real $4 && zztestar numero_real $5
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11212,7 +11829,7 @@ zzmat ()
 				fi
 			;;
 			cilindro)
-				if(zzmat testa_num $3 && zzmat testa_num $4)
+				if zztestar numero_real $3 && zztestar numero_real $4
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11222,7 +11839,7 @@ zzmat ()
 				fi
 			;;
 			cone)
-				if(zzmat testa_num $3 && zzmat testa_num $4)
+				if zztestar numero_real $3 && zztestar numero_real $4
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11232,7 +11849,7 @@ zzmat ()
 				fi
 			;;
 			prisma)
-				if(zzmat testa_num $3 && zzmat testa_num $4)
+				if zztestar numero_real $3 && zztestar numero_real $4
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11242,7 +11859,7 @@ zzmat ()
 				fi
 			;;
 			piramide)
-				if(zzmat testa_num $3 && zzmat testa_num $4)
+				if zztestar numero_real $3 && zztestar numero_real $4
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11253,7 +11870,7 @@ zzmat ()
 			;;
 			toro)
 				local num_maior num_menor
-				if(zzmat testa_num $3 && zzmat testa_num $4 && test $(zzmat compara_num $3 $4) != "igual")
+				if zztestar numero_real $3 && zztestar numero_real $4 && test $(zzmat compara_num $3 $4) != "igual"
 				then
 					num1=$(echo "$3" | tr ',' '.')
 					num2=$(echo "$4" | tr ',' '.')
@@ -11267,7 +11884,7 @@ zzmat ()
 			tetraedro | cubo | octaedro | dodecaedro | icosaedro | esfera | cuboctaedro | rombicuboctaedro | rombicosidodecaedro | icosidodecaedro)
 				if test -n "$3"
 				then
-					if(zzmat testa_num $3)
+					if zztestar numero_real $3
 					then
 						num1=$(echo "$3" | tr ',' '.')
 						case $2 in
@@ -11282,7 +11899,7 @@ zzmat ()
 						icosidodecaedro)     num="((45+17*sqrt(5))*${num1}^3)/6";;
 						rombicosidodecaedro) num="(60+29*sqrt(5))/3*${num1}^3";;
 						esac
-					elif (test $3 = "truncado" && zzmat testa_num $4)
+					elif test $3 = "truncado" && zztestar numero_real $4
 					then
 						num1=$(echo "$4" | tr ',' '.')
 						case $2 in
@@ -11294,7 +11911,7 @@ zzmat ()
 						cuboctaedro)     num="(22+14*sqrt(2))*${num1}^3";;
 						icosidodecaedro) num="(90+50*sqrt(5))*${num1}^3";;
 						esac
-					elif (test $3 = "snub" && zzmat testa_num $4)
+					elif test $3 = "snub" && zztestar numero_real $4
 					then
 						num1=$(echo "$4" | tr ',' '.')
 						case $2 in
@@ -11327,7 +11944,7 @@ zzmat ()
 			shift
 			for num2 in $*
 			do
-				if (zztool testa_numero $num1 && zztool testa_numero $num2)
+				if zztestar numero $num1 && zztestar numero $num2
 				then
 					test "$num1" -gt "$num2" && num_maior=$num1 || num_maior=$num2
 					test "$num1" -lt "$num2" && num_menor=$num1 || num_menor=$num2
@@ -11359,16 +11976,15 @@ zzmat ()
 	;;
 	somatoria | produtoria)
 		#colocar x como a variavel a ser substituida
-		if (test $# -eq "4")
+		if test $# -eq "4"
 		then
 			zzmat $funcao $2 $3 1 $4
-		elif (test $# -eq "5" && zzmat testa_num $2 && zzmat testa_num $3 &&
-			zzmat testa_num $4 && zztool grep_var "x" $5 )
+		elif test $# -eq "5" && zztestar numero_real $2 && zztestar numero_real $3 && zztestar numero_real $4 && zztool grep_var "x" $5
 		then
 			local equacao numero operacao sequencia num1 num2
 			equacao=$(echo "$5" | sed 's/\[/(/g;s/\]/)/g')
 			test "$funcao" = "somatoria" && operacao='+' || operacao='*'
-			if (test $(zzmat compara_num $2 $3) = 'maior')
+			if test $(zzmat compara_num $2 $3) = 'maior'
 			then
 				num1=$2; num2=$3
 			else
@@ -11390,7 +12006,7 @@ zzmat ()
 		fi
 	;;
 	media | soma | produto)
-		if (test $# -ge "2")
+		if test $# -ge "2"
 		then
 			local soma=0
 			local qtde=0
@@ -11400,11 +12016,11 @@ zzmat ()
 			shift
 			while test $# -ne "0"
 			do
-				if (zztool grep_var "[" "$1" && zztool grep_var "]" "$1")
+				if zztool grep_var "[" "$1" && zztool grep_var "]" "$1"
 				then
 					valor=$(echo "$1" | sed 's/\([0-9]\{1,\}\)\[.*/\1/' | tr ',' '.')
 					peso=$(echo "$1" | sed 's/.*\[//;s/\]//')
-					if (zzmat testa_num "$valor" && zztool testa_numero "$peso")
+					if zztestar numero_real "$valor" && zztestar numero "$peso"
 					then
 						if test $funcao = 'produto'
 						then
@@ -11414,7 +12030,7 @@ zzmat ()
 							qtde=$(($qtde+$peso))
 						fi
 					fi
-				elif zzmat testa_num "$1"
+				elif zztestar numero_real "$1"
 				then
 					if test $funcao = 'produto'
 					then
@@ -11442,22 +12058,25 @@ zzmat ()
 		fi
 	;;
 	fat)
-		if (test $# -eq "2" -o $# -eq "3" && zztool testa_numero "$2" && test "$2" -ge "1")
+		if test $# -eq "2" -o $# -eq "3" && zztestar numero "$2" && test "$2" -ge "1"
 		then
+			local num1 num2
 			if test "$3" = "s"
 			then
-				local num1 num2
-				num2=1
-				for num1 in $(zzseq $2)
-				do
-					num2=$(echo "$num1 * $num2" | bc | tr -d '\n\\')
-					printf "%s " $num2
-				done | zztrim -r
-				echo
+				num1=$(zzseq $2)
 			else
-				zzseq $2 | paste -s -d* - | bc | tr -d '\n\\'
-				echo
+				num1="$2"
 			fi
+			for num2 in $(echo "$num1")
+			do
+				echo "define fat(x) { if (x <= 1) return (1); return (fat(x-1) * x); }; fat($num2)" |
+				bc |
+				tr -d '\\\n' |
+				zztool nl_eof
+			done |
+			tr '\n' ' ' |
+			zztrim |
+			zztool nl_eof
 		else
 			zztool erro " zzmat $funcao: Resultado do produto de 1 ao numero atual (fatorial)"
 			zztool erro " Com o argumento 's' imprime a sequência até a posição."
@@ -11469,8 +12088,7 @@ zzmat ()
 		fi
 	;;
 	arranjo | combinacao | arranjo_r | combinacao_r)
-		if (test $# -eq "3" && zztool testa_numero "$2" && zztool testa_numero "$3" &&
-			test "$2" -ge "$3" && test "$3" -ge "1")
+		if test $# -eq "3" && zztestar numero "$2" && zztestar numero "$3" && test "$2" -ge "$3" && test "$3" -ge "1"
 		then
 			local n p dnp
 			n=$(zzmat fat $2)
@@ -11481,7 +12099,7 @@ zzmat ()
 			arranjo_r)  zzmat elevado "$2" "$3";;
 			combinacao) test "$2" -gt "$3" && num="${n}/(${p}*${dnp})" || return 1;;
 			combinacao_r)
-				if (test "$2" -gt "$3")
+				if test "$2" -gt "$3"
 				then
 					n=$(zzmat fat $(($2+$3-1)))
 					dnp=$(zzmat fat $(($2-1)))
@@ -11501,13 +12119,13 @@ zzmat ()
 		fi
 	;;
 	newton | binomio_newton)
-		if (test "$#" -ge "2")
+		if test "$#" -ge "2"
 		then
 			local num1 num2 grau sinal parcela coeficiente
 			num1="a"
 			num2="b"
 			sinal="+"
-			zztool testa_numero "$2" && grau="$2"
+			zztestar numero "$2" && grau="$2"
 			if test -n "$3"
 			then
 				if test "$3" = "+" -o "$3" = "-"
@@ -11539,8 +12157,7 @@ zzmat ()
 		fi
 	;;
 	pa | pa2 | pg)
-		if (test $# -eq "4" && zzmat testa_num "$2" &&
-		zzmat testa_num "$3" && zztool testa_numero "$4")
+		if test $# -eq "4" && zztestar numero_real "$2" && zztestar numero_real "$3" && zztestar numero "$4"
 		then
 			local num_inicial razao passo valor
 			num_inicial=$(echo "$2" | tr ',' '.')
@@ -11576,7 +12193,7 @@ zzmat ()
 	;;
 	fibonacci | fib | lucas)
 	# Sequência ou número de fibonacci
-		if zztool testa_numero "$2"
+		if zztestar numero "$2"
 		then
 			awk 'BEGIN {
 					seq = ( "'$3'" == "s" ? 1 : 0 )
@@ -11593,19 +12210,19 @@ zzmat ()
 				zztrim -r |
 				zztool nl_eof
 		else
-			echo " Número de fibonacci ou lucas, na posição especificada."
+			echo " Número de Fibonacci ou Lucas na posição especificada."
 			echo " Com o argumento 's' imprime a sequência até a posição."
 			echo " Uso: zzmat $funcao <número> [s]"
 		fi
 	;;
 	tribonacci | trib)
 	# Sequência ou número Tribonacci
-		if zztool testa_numero "$2"
+		if zztestar numero "$2"
 		then
 			awk 'BEGIN {
 					seq = ( "'$3'" == "s" ? 1 : 0 )
 					num1 = 0
-					num2 = 1
+					num2 = 0
 					num3 = 1
 					for ( i = 0; i < '$2' + seq; i++ ) {
 						if ( seq == 1 ) { printf "%s ", num1 }
@@ -11619,10 +12236,73 @@ zzmat ()
 				zztrim -r |
 				zztool nl_eof
 		else
-			echo " Número de tribonacci, na posição especificada."
+			echo " Número de Tribonacci na posição especificada."
 			echo " Com o argumento 's' imprime a sequência até a posição."
 			echo " Uso: zzmat $funcao <número> [s]"
 		fi
+	;;
+	recaman)
+	# Sequência ou número Recamán
+		if zztestar numero "$2"
+		then
+			awk 'BEGIN {
+					seq = ( "'$3'" == "s" ? 1 : 0 )
+					a[0]=0; b[0]=0
+					for ( i = 1; i <= '$2'; i++ ) {
+						num=a[i-1]
+						a[i] = ((num > i && ! ((num - i) in b)) ? num - i : num + i)
+						b[a[i]]=i
+					}
+					if ( seq ) { for (i=0; i<length(a); i++) printf "%d ", a[i] }
+					else { print a[length(a)-1] }
+				}' |
+				zztrim -r |
+				zztool nl_eof
+		else
+			echo " Número de Recamán na posição especificada."
+			echo " Com o argumento 's' imprime a sequência até a posição."
+			echo " Uso: zzmat $funcao <número> [s]"
+		fi
+	;;
+	mersenne)
+	# Sequência ou número de Mersenne
+		if zztestar numero "$2"
+		then
+			zzseq -f '2^%d-1\n' 0 $2 |
+			bc |
+			awk '{ if ($0 ~ /\\$/) { sub(/\\/,""); printf $0 } else { print } }' |
+			if test "s" = "$3"
+			then
+				zztool lines2list | zztool nl_eof
+			else
+				sed -n '$p'
+			fi
+		else
+				echo " Número de Mersenne na posição especificada."
+				echo " Com o argumento 's' imprime a sequência até a posição."
+				echo " Uso: zzmat $funcao <número> [s]"
+		fi
+	;;
+	collatz)
+	# Sequência de Collatz
+	if zztestar numero "$2"
+	then
+		awk '
+				function collatz(num) {
+					printf num " "
+					if (num>1) {
+						if (num%2==0) { collatz(num/2) }
+						else { collatz(3*num+1) }
+					}
+				}
+				BEGIN { collatz('$2')}
+			' |
+			zztrim |
+			zztool nl_eof
+	else
+		echo " Sequência de Collatz"
+		echo " Uso: zzmat $funcao <número>"
+	fi
 	;;
 	r3)
 		shift
@@ -11636,7 +12316,7 @@ zzmat ()
 				num="$1"
 				ind=1
 				zztool grep_var "i" "$1" && ind=0 && num=$(echo "$1" | sed 's/i//')
-				if (zzmat testa_num ${num%/*} || test ${num%/*} = 'x') && (zzmat testa_num ${num#*/} || test ${num#*/} = 'x')
+				if (zztestar numero_real ${num%/*} || test ${num%/*} = 'x') && (zztestar numero_real ${num#*/} || test ${num#*/} = 'x')
 				then
 					num3=$((num3+1))
 					if test $((num3%2)) -eq $ind
@@ -11678,7 +12358,7 @@ zzmat ()
 	;;
 	eq2g)
 	#Equação do Segundo Grau: Raizes e Vértice
-		if (test $# = "4" && zzmat testa_num $2 && zzmat testa_num $3 && zzmat testa_num $4)
+		if test $# = "4" && zztestar numero_real $2 && zztestar numero_real $3 && zztestar numero_real $4
 		then
 			local delta num_raiz vert_x vert_y raiz1 raiz2
 			delta=$(echo "$2 $3 $4" | tr ',' '.' | awk '{valor=$2^2-(4*$1*$3); print valor}')
@@ -11716,7 +12396,7 @@ zzmat ()
 		fi
 	;;
 	d2p)
-		if (test $# = "3" && zztool grep_var "," "$2" && zztool grep_var "," "$3")
+		if test $# = "3" && zztool grep_var "," "$2" && zztool grep_var "," "$3"
 		then
 			local x1 y1 z1 x2 y2 z2 a b
 			x1=$(echo "$2" | cut -f1 -d,)
@@ -11725,12 +12405,11 @@ zzmat ()
 			x2=$(echo "$3" | cut -f1 -d,)
 			y2=$(echo "$3" | cut -f2 -d,)
 			z2=$(echo "$3" | cut -f3 -d,)
-			if (zzmat testa_num $x1 && zzmat testa_num $y1 &&
-				zzmat testa_num $x2 && zzmat testa_num $y2 )
+			if zztestar numero_real $x1 && zztestar numero_real $y1 && zztestar numero_real $x2 && zztestar numero_real $y2
 			then
 				a=$(echo "(($y1)-($y2))^2" | bc -l)
 				b=$(echo "(($x1)-($x2))^2" | bc -l)
-				if (zzmat testa_num $z1 && zzmat testa_num $z2)
+				if zztestar numero_real $z1 && zztestar numero_real $z2
 				then
 					num="sqrt((($z1)-($z2))^2+$a+$b)"
 				else
@@ -11746,7 +12425,7 @@ zzmat ()
 		fi
 	;;
 	vetor)
-		if (test $# -ge "3")
+		if test $# -ge "3"
 		then
 			local valor ang teta fi oper tipo num1 saida
 			local x1=0
@@ -11764,35 +12443,35 @@ zzmat ()
 				zztool grep_var "," $1 && teta=$(echo "$1" | cut -f2 -d,)
 				zztool grep_var "," $1 && fi=$(echo "$1" | cut -f3 -d,)
 
-				if (test -n "$fi" && zzmat testa_num $valor)
+				if test -n "$fi" && zztestar numero_real $valor
 				then
 					num1=$(echo "$fi" | sed 's/g$//; s/gr$//; s/rad$//')
-					ang=${fi#$num1}
+					ang=$(echo "$fi" | tr -d -c '[grad]')
 					echo "$fi" | grep -E '(g|rad|gr)$' >/dev/null
-					if (test "$?" -eq "0" && zzmat testa_num $num1)
+					if test "$?" -eq "0" && zztestar numero_real $num1
 					then
 						case $ang in
-						g)   fi=$(zzmat converte gr $num1);;
-						gr)  fi=$(zzmat converte dr $num1);;
+						g)   fi=$(zzconverte -p$((precisao+2)) gr $num1);;
+						gr)  fi=$(zzconverte -p$((precisao+2)) ar $num1);;
 						rad) fi=$num1;;
 						esac
 						z1=$(echo "$z1 $oper $(zzmat cos ${fi}rad) * $valor" | bc -l)
-					elif zzmat testa_num $num1
+					elif zztestar numero_real $num1
 					then
 						z1="$num1"
 					fi
 				fi
 
-				if (test -n "$teta" && zzmat testa_num $valor)
+				if test -n "$teta" && zztestar numero_real $valor
 				then
 					num1=$(echo "$teta" | sed 's/g$//; s/gr$//; s/rad$//')
-					ang=${teta#$num1}
+					ang=$(echo "$teta" | tr -d -c '[grad]')
 					echo "$teta" | grep -E '(g|rad|gr)$' >/dev/null
-					if (test "$?" -eq "0" && zzmat testa_num $num1)
+					if test "$?" -eq "0" && zztestar numero_real $num1
 					then
 						case $ang in
-						g)   teta=$(zzmat converte gr $num1);;
-						gr)  teta=$(zzmat converte dr $num1);;
+						g)   teta=$(zzconverte -p$((precisao+2)) gr $num1);;
+						gr)  teta=$(zzconverte -p$((precisao+2)) ar $num1);;
 						rad) teta=$num1;;
 						esac
 					else
@@ -11800,7 +12479,7 @@ zzmat ()
 					fi
 				fi
 
-				if zzmat testa_num $valor
+				if zztestar numero_real $valor
 				then
 					test -n "$fi" && num1=$(echo "$(zzmat sen ${fi}rad)*$valor" | bc -l) ||
 						num1=$valor
@@ -11817,12 +12496,12 @@ zzmat ()
 
 			case $saida in
 			g)
-				teta=$(zzmat converte rg $teta)
-				fi=$(zzmat converte rg $fi)
+				teta=$(zzconverte -p$((precisao+2)) rg $teta)
+				fi=$(zzconverte -p$((precisao+2)) rg $fi)
 			;;
 			gr)
-				teta=$(zzmat converte rd $teta)
-				fi=$(zzmat converte rd $fi)
+				teta=$(zzconverte -p$((precisao+2)) ra $teta)
+				fi=$(zzconverte -p$((precisao+2)) ra $fi)
 			;;
 			*) saida="rad";;
 			esac
@@ -11861,23 +12540,20 @@ zzmat ()
 	#y1 – y2 = a
 	#x2 – x1 = b
 	#x1y2 – x2y1 = c
-		if (test $# = "3" && zztool grep_var "," "$2" && zztool grep_var "," "$3")
+		if test $# = "3" && zztool grep_var "," "$2" && zztool grep_var "," "$3"
 		then
 			local x1 y1 x2 y2 a b c redutor m
 			x1=$(echo "$2" | cut -f1 -d,)
 			y1=$(echo "$2" | cut -f2 -d,)
 			x2=$(echo "$3" | cut -f1 -d,)
 			y2=$(echo "$3" | cut -f2 -d,)
-			if (zzmat testa_num $x1 && zzmat testa_num $y1 &&
-				zzmat testa_num $x2 && zzmat testa_num $y2 )
+			if zztestar numero_real $x1 && zztestar numero_real $y1 && zztestar numero_real $x2 && zztestar numero_real $y2
 			then
 				a=$(awk 'BEGIN {valor=('$y1')-('$y2'); printf "%.'${precisao}'f\n", valor}' | zzmat -p${precisao} sem_zeros)
 				b=$(awk 'BEGIN {valor=('$x2')-('$x1');  printf "%+.'${precisao}'f\n", valor}' | zzmat -p${precisao} sem_zeros)
 				c=$(zzmat det $x1 $y1 $x2 $y2 | awk '{printf "%+.'${precisao}'f\n", $1}' | zzmat -p${precisao} sem_zeros)
 				m=$(awk 'BEGIN {valor=(('$y2'-'$y1')/('$x2'-'$x1')); printf "%.'${precisao}'f\n", valor}' | zzmat -p${precisao} sem_zeros)
-				if (zztool testa_numero_sinal $a &&
-					zztool testa_numero_sinal $b &&
-					zztool testa_numero_sinal $c)
+				if zztestar numero_sinal $a && zztestar numero_sinal $b && zztestar numero_sinal $c
 				then
 					redutor=$(zzmat mdc $(zzmat abs $a) $(zzmat abs $b) $(zzmat abs $c))
 					a=$(awk 'BEGIN {valor=('$a')/('$redutor'); print valor}')
@@ -11911,13 +12587,13 @@ zzmat ()
 	#x2 + y2 - 2ax - 2by + a2 + b2 - r2 = 0
 	#A=-2ax | B=-2by | C=a2+b2-r2
 	#r=raio | a=coordenada x do centro | b=coordenada y do centro
-		if (test $# = "3" && zztool grep_var "," "$2")
+		if test $# = "3" && zztool grep_var "," "$2"
 		then
 			local a b r A B C
 			if zztool grep_var "," "$3"
 			then
 				r=$(zzmat d2p $2 $3)
-			elif zzmat testa_num "$3"
+			elif zztestar numero_real "$3"
 			then
 				r=$(echo "$3" | tr ',' '.')
 			else
@@ -11937,8 +12613,7 @@ zzmat ()
 	;;
 	egc3p)
 	#Equação Geral da Circunferência: 3 Pontos
-		if (test $# = "4" && zztool grep_var "," "$2" &&
-			zztool grep_var "," "$3" && zztool grep_var "," "$4")
+		if test $# = "4" && zztool grep_var "," "$2" &&	zztool grep_var "," "$3" && zztool grep_var "," "$4"
 		then
 			local x1 y1 x2 y2 x3 y3 A B C D
 			x1=$(echo "$2" | cut -f1 -d,)
@@ -11948,18 +12623,18 @@ zzmat ()
 			x3=$(echo "$4" | cut -f1 -d,)
 			y3=$(echo "$4" | cut -f2 -d,)
 
-			if (test $(zzmat det $x1 $y1 1 $x2 $y2 1 $x3 $y3 1) -eq 0)
+			if test $(zzmat det $x1 $y1 1 $x2 $y2 1 $x3 $y3 1) -eq 0
 			then
 				zztool erro "Pontos formam uma reta."
 				return 1
 			fi
 
-			if (! zzmat testa_num $x1 || ! zzmat testa_num $x2 || ! zzmat testa_num $x3)
+			if ! zztestar numero_real $x1 || ! zztestar numero_real $x2 || ! zztestar numero_real $x3
 			then
 				zztool erro " Uso: zzmat $funcao ponto(a,b) ponto(c,d) ponto(x,y)";return 1
 			fi
 
-			if (! zzmat testa_num $y1 || ! zzmat testa_num $y2 || ! zzmat testa_num $y3)
+			if ! zztestar numero_real $y1 || ! zztestar numero_real $y2 || ! zztestar numero_real $y3
 			then
 				zztool erro " Uso: zzmat $funcao ponto(a,b) ponto(c,d) ponto(x,y)";return 1
 			fi
@@ -11990,13 +12665,13 @@ zzmat ()
 	#x2 + y2 + z2 - 2ax - 2by -2cz + a2 + b2 + c2 - r2 = 0
 	#A=-2ax | B=-2by | C=-2cz | D=a2+b2+c2-r2
 	#r=raio | a=coordenada x do centro | b=coordenada y do centro | c=coordenada z do centro
-		if (test $# = "3" && zztool grep_var "," "$2")
+		if test $# = "3" && zztool grep_var "," "$2"
 		then
 			local a b c r A B C D
 			if zztool grep_var "," "$3"
 			then
 				r=$(zzmat d2p $2 $3)
-			elif zzmat testa_num "$3"
+			elif zztestar numero_real "$3"
 			then
 				r=$(echo "$3" | tr ',' '.')
 			else
@@ -12006,7 +12681,7 @@ zzmat ()
 			b=$(echo "$2" | cut -f2 -d,)
 			c=$(echo "$2" | cut -f3 -d,)
 
-			if(! zzmat testa_num $a || ! zzmat testa_num $b || ! zzmat testa_num $c)
+			if ! zztestar numero_real $a || ! zztestar numero_real $b || ! zztestar numero_real $c
 			then
 				zztool erro " Uso: zzmat $funcao centro(a,b,c) (numero|ponto(x,y,z))";return 1
 			fi
@@ -12041,11 +12716,11 @@ zzmat ()
 			return
 		fi
 
-		if (zzmat testa_num $3)
+		if zztestar numero_real $3
 		then
 			max=$(echo "$3" | tr ',' '.')
-			if zzmat testa_num $2;then min=$(echo "$2" | tr ',' '.');fi
-		elif (zzmat testa_num $2)
+			if zztestar numero_real $2;then min=$(echo "$2" | tr ',' '.');fi
+		elif zztestar numero_real $2
 		then
 			max=$(echo "$2" | tr ',' '.')
 		fi
@@ -12058,7 +12733,7 @@ zzmat ()
 			unset n_temp
 		fi
 
-		if test -n "$4" && zztool testa_numero $4;then qtde=$4;fi
+		if test -n "$4" && zztestar numero $4;then qtde=$4;fi
 
 		case "$funcao" in
 		aleatorio)
@@ -12079,13 +12754,13 @@ zzmat ()
 	;;
 	det)
 		# Determinante de matriz (2x2 ou 3x3)
-		if (test $# -ge "5" && test $# -le "10")
+		if test $# -ge "5" && test $# -le "10"
 		then
 			local num
 			shift
 			for num in $*
 			do
-				if ! zzmat testa_num "$num"
+				if ! zztestar numero_real "$num"
 				then
 					zztool erro " Uso: zzmat $funcao numero1 numero2 numero3 numero4 [numero5 numero6 numero7 numero8 numero9]"
 					return 1
@@ -12104,7 +12779,7 @@ zzmat ()
 	;;
 	conf_eq)
 		# Confere equação
-		if (test $# -ge "2")
+		if test $# -ge "2"
 		then
 			equacao=$(echo "$2" | sed 's/\[/(/g;s/\]/)/g')
 			local x y z eq
@@ -12151,6 +12826,60 @@ zzmat ()
 }
 
 # ----------------------------------------------------------------------------
+# zzmcd
+# Cria diretórios e subdiretórios, e muda diretório de trabalho (primeiro).
+#
+# Opções:
+#      -n: Cria os diretórios, mas não muda o diretório de trabalho atual.
+#      -s: Apenas simula o comando mkdir com os argumentos
+#
+# Uso: zzmcd [-n|-s] <dir[/subdir]> [dir[/subdir]]
+# Ex.: zzmcd tmp1/tmp2
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2018-03-30
+# Versão: 1
+# Licença: GPL
+# ----------------------------------------------------------------------------
+zzmcd ()
+{
+	zzzz -h mcd "$1" && return
+
+	local opt dir erro
+
+	# Verificação das opções
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+			-n) opt="n"; shift;;
+			-s) opt="s"; shift;;
+			--) shift; break;;
+			-*) zztool -e uso mcd; return 1;;
+		esac
+	done
+
+	# Verificação dos parâmetros
+	test -n "$1" || { zztool -e uso mcd; return 1; }
+
+	# Cria/simula os diretório
+	case "$opt" in
+		s) echo mkdir -p $*; erro=0 ;;
+		*)
+			mkdir -p $* 2>/dev/null && test "$opt" = "n" && erro=0
+			# Verificando diretórios que falharam
+			for dir in $*
+			do
+				test -d "$dir" || zztool erro "'$dir' não criado."
+			done
+		;;
+	esac
+
+	# Desloca-se ao primeiro diretório criado no último nivel possível
+	test -d "$1" && test -z "$opt" && cd "$1"
+	return $erro
+}
+
+# ----------------------------------------------------------------------------
 # zzmd5
 # Calcula o código MD5 dos arquivos informados, ou de um texto via STDIN.
 # Obs.: Wrapper portável para os comandos md5 (Mac) e md5sum (Linux).
@@ -12163,6 +12892,7 @@ zzmat ()
 # Desde: 2011-05-06
 # Versão: 1
 # Licença: GPL
+# Nota: (ou) md5 md5sum
 # ----------------------------------------------------------------------------
 zzmd5 ()
 {
@@ -12240,16 +12970,17 @@ zzmd5 ()
 
 # ----------------------------------------------------------------------------
 # zzminiurl
-# http://migre.me
-# Encurta uma URL utilizando o site migre.me.
+# Encurta uma URL utilizando o google ("https://goo.gl/").
+# Caso a URL já seja encurtada, será exibida a URL completa.
 # Obs.: Se a URL não tiver protocolo no início, será colocado http://
 # Uso: zzminiurl URL
 # Ex.: zzminiurl http://www.funcoeszz.net
 #      zzminiurl www.funcoeszz.net         # O http:// no início é opcional
+#      zzminiurl https://goo.gl/yz4cb9
 #
 # Autor: Vinícius Venâncio Leite <vv.leite (a) gmail com>
 # Desde: 2010-04-26
-# Versão: 4
+# Versão: 6
 # Licença: GPL
 # ----------------------------------------------------------------------------
 zzminiurl ()
@@ -12260,12 +12991,25 @@ zzminiurl ()
 
 	local url="$1"
 	local prefixo='http://'
+	local urlencurtador='https://www.googleapis.com/urlshortener/v1/url?key=AIzaSyAutIDVbN_3CmtxpunVnXruLYYAXs5e9Sw'
+	local urlexpansor="https://www.googleapis.com/urlshortener/v1/url?key=AIzaSyAutIDVbN_3CmtxpunVnXruLYYAXs5e9Sw&shortUrl"
+	local contenttype='Content-Type: application/json'
+	local parametro="{\"longUrl\": \"$url\"}"
+	local urlcurta
+	local urlcompara
 
 	# Se o usuário não informou o protocolo, adiciona o padrão
 	echo "$url" | egrep '^(https?|ftp|mms)://' >/dev/null || url="$prefixo$url"
 
-	$ZZWWWHTML "http://migre.me/api.txt?url=$url" 2>/dev/null
-	echo
+	urlcompara=$(echo "$url" | sed 's/\(.*\:\/\/\)\(goo\.gl\).*/\2/')
+	urlcurta=$(curl -s "$urlencurtador" -H "$contenttype" -d "$parametro" 2>/dev/null)
+
+	if test "$urlcompara" == 'goo.gl'
+	then
+		curl -s "$urlexpansor=$url" | sed -n '/"longUrl"/ {s/.*\(http[^"]*\)".*/\1/g; p; }'
+	else
+		echo "$urlcurta" | sed -n '/"id"/ {s/.*\(http[^"]*\)".*/\1/g; p;}'
+	fi
 }
 
 # ----------------------------------------------------------------------------
@@ -12490,7 +13234,7 @@ zzmoneylog ()
 	# Consigo ler o arquivo? (Se não for pasta nem STDIN)
 	if ! test -d "$arquivo" && test "$arquivo" != '-'
 	then
-		zztool arquivo_legivel "$arquivo" || return 1
+		zztool -e arquivo_legivel "$arquivo" || return 1
 	fi
 
 	### DATA
@@ -12690,39 +13434,6 @@ zzmudaprefixo ()
 }
 
 # ----------------------------------------------------------------------------
-# zznarrativa
-# http://translate.google.com
-# Narra frases em português usando o Google Tradutor.
-#
-# Uso: zznarrativa palavras
-# Ex.: zznarrativa regex é legal
-#
-# Autor: Kl0nEz <kl0nez (a) wifi org br>
-# Desde: 2011-08-23
-# Versão: 4
-# Licença: GPLv2
-# Requisitos: zzplay
-# ----------------------------------------------------------------------------
-zznarrativa ()
-{
-	zzzz -h narrativa "$1" && return
-
-	test -n "$1" || { zztool -e uso narrativa; return 1; }
-
-	# Variaveis locais
-	local padrao
-	local url='http://translate.google.com.br'
-	local charset_para='UTF-8'
-	local audio_file=$(zztool cache narrativa "$$.wav")
-
-	# Narrativa
-	padrao=$(echo "$*" | sed "$ZZSEDURL")
-	local audio="translate_tts?ie=$charset_para&q=$padrao&tl=pt"
-	$ZZWWWHTML "$url/$audio" > $audio_file && zzplay $audio_file mplayer
-	zztool cache rm narrativa
-}
-
-# ----------------------------------------------------------------------------
 # zznatal
 # http://www.ibb.org.br/vidanet
 # A mensagem "Feliz Natal" em vários idiomas.
@@ -12747,7 +13458,7 @@ zznatal ()
 	# Se o cache está vazio, baixa listagem da Internet
 	if ! test -s "$cache"
 	then
-		$ZZWWWDUMP "$url" | sed '
+		zztool dump "$url" | sed '
 			1,10d
 			77,179d
 			s/^  *//
@@ -12761,83 +13472,120 @@ zznatal ()
 }
 
 # ----------------------------------------------------------------------------
-# zznome
-# http://www.significado.origem.nom.br/
-# Dicionário de nomes, com sua origem, numerologia e arcanos do tarot.
-# Pode-se filtrar por significado, origem, letra (primeira letra), tarot
-# marca (no mundo), numerologia ou tudo - como segundo argumento (opcional).
-# Por padrão lista origem e significado.
+# zznerdcast
+# Lista os episódios do podcast NerdCast.
 #
-# Uso: zznome nome [significado|origem|letra|marca|numerologia|tarot|tudo]
-# Ex.: zznome maria
-#      zznome josé origem
+# Opções para a listagem:
+#   -n <número> - Quantidade de resultados retornados (padrão = 15)
+#   -d <data>   - Filtra por uma data específica.
+#   -m <mês>    - Filtra por um mês específico. Sem o ano seleciona atual.
+#   -a <ano>    - Filtra por um ano em específico.
 #
-# Autor: Itamar <itamarnet (a) yahoo com br>
-# Desde: 2011-04-22
-# Versão: 4
+#   Obs.: No lugar de -d, -m, -a pode usar --data, --mês ou --mes, --ano.
+#         Na opção -d, <data> pode ser "hoje", "ontem" e "anteontem".
+#         Na opção -n, <número> se for igual a 0, não limita a quantidade.
+#
+#   Opções adicionais são consideradas termos a serem filtrados na consulta.
+#
+# Uso: zznerdcast [-n <número>| -d <data> | -m <mês>| -a <ano>] [texto]
+# Ex.: zznerdcast
+#      zznerdcast -n 30
+#      zznerdcast -d 28.10.16
+#      zznerdcast -m 5/2014
+#      zznerdcast -a 2014 Empreendedor
+#      zznerdcast Terra
+#
+# Autor: Diogo Alexsander Cavilha <diogocavilha (a) gmail com>
+# Desde: 2016-09-19
+# Versão: 2
 # Licença: GPL
-# Requisitos: zzsemacento zzminusculas
+# Requisitos: zzdatafmt zzunescape zzxml
 # ----------------------------------------------------------------------------
-zznome ()
+zznerdcast ()
 {
-	zzzz -h nome "$1" && return
+	zzzz -h nerdcast "$1" && return
 
-	local url='http://www.significado.origem.nom.br'
-	local ini='Qual a origem do nome '
-	local fim='Analise da Primeira Letra do Nome:'
-	local nome=$(echo "$1" | zzminusculas | zzsemacento)
+	local cache=$(zztool cache nerdcast)
+	local limite='15'
+	local filtro='.'
+	local data
 
-	# Verificação dos parâmetros
-	test -n "$1" || { zztool -e uso nome; return 1; }
+	# Opções de linha de comando
+	while  test "${1#-}" != "$1"
+	do
+		case "$1" in
+		-n)
+			if zztool testa_numero "$2"
+			then
+				limite="$2"
+				test "$limite" -eq 0 && limite='$'
+				shift
+			fi
+			shift
+		;;
+		-d | --data)
+			data=$(zzdatafmt --en -f "DD MMM AAAA" "$2" 2>/dev/null)
+			if test -n "$data"
+			then
+				unset limite
+				shift
+			fi
+			shift
+		;;
+		-m | --m[eê]s)
+			data=$(zzdatafmt --en -f "MMM AAAA" "1/$2" 2>/dev/null)
+			if test -n "$data"
+			then
+				unset limite
+				shift
+			fi
+			shift
+		;;
+		-a | --ano)
+			data=$(zzdatafmt --en -f "AAAA" "1/1/$2" 2>/dev/null)
+			if test -n "$data"
+			then
+				unset limite
+				shift
+			fi
+			shift
+		;;
+		--) shift; break ;;
+		-*) zztool -e uso nerdcast; return 1 ;;
+		esac
+	done
 
-	case "$2" in
-		origem)
-			ini='Qual a origem do nome '
-			fim='^ *$'
-		;;
-		significado)
-			ini='Qual o significado do nome '
-			fim='^ *$'
-		;;
-		letra)
-			ini='Analise da Primeira Letra do Nome:'
-			fim='Sua marca no mundo!'
-		;;
-		marca)
-			ini='Sua marca no mundo!'
-			fim='Significado - Numerologia - Expressão'
-		;;
-		numerologia)
-			ini='Significado - Numerologia - Expressão'
-			fim=' - Arcanos do Tarot'
-		;;
-		tarot)
-			ini=' - Arcanos do Tarot'
-			fim='^VEJA TAMBÉM'
-		;;
-		tudo)
-			ini='Qual a origem do nome '
-			fim='^VEJA TAMBÉM'
-		;;
-	esac
+	# Grepando os resultados
+	test $# -gt 0 && filtro="$*"
+	filtro=$(zztool endereco_sed "$filtro")
 
-	$ZZWWWDUMP "$url/nomes/?q=$nome" |
-		sed -n "
-		/$ini/,/$fim/ {
-			/$fim/d
-			/\[.*: :.*\]/d
-			/\[[0-9]\{1,\}\.jpg\]/d
-			s/^ *//g
-			s/^Qual a origem/Origem/
-			s/^Qual o significado/Significado/
-			/^Significado de / {
-				N
-				d
-			}
-			p
-		}" 2>/dev/null
-		# Escondendo erros pois a codificação do site é estranha
-		# https://github.com/aureliojargas/funcoeszz/issues/27
+	# Usa o cache se existir e estiver atualizado, senão baixa um novo.
+	if ! test -s "$cache" || test $(head -n 1 "$cache") != $(zzdatafmt --iso hoje)
+	then
+		zzdatafmt --iso hoje > "$cache"
+
+		zztool source "https://jovemnerd.com.br/feed-nerdcast/" |
+		zzxml --tag title --tag enclosure --tag pubDate |
+		awk '
+			/<title>/{ getline; if ($0 ~ /[0-9a-z] - /) printf $0 " | "}
+			/\.mp3"/{ printf $2 " | " }
+			/<pubDate>/{ getline; print $2,$3,$4 }
+			' |
+		sed '/url="/ { s///;s/"//; }' |
+		zzunescape --html >> "$cache"
+	fi
+
+	# Filtra pelo assunto
+	# Filtra por data ou quantidade
+	# E formata  saída
+	sed -n "1d;${filtro}p" "$cache" |
+	if test -n "$data"
+	then
+		grep "${data}$"
+	else
+		sed "${limite}q"
+	fi |
+	awk -F ' [|] ' '/[|]/ { print $1,"|",$3; print $2; print "" }'
 }
 
 # ----------------------------------------------------------------------------
@@ -12848,7 +13596,7 @@ zznome ()
 # Ex.: zznomealeatorio
 #      zznomealeatorio 8
 #
-# Autor: Guilherme Magalhães Gall <gmgall (a) gmail com> twitter: @gmgall
+# Autor: Guilherme Magalhães Gall <gmgall (a) gmail com>
 # Desde: 2013-03-03
 # Versão: 2
 # Licença: GPL
@@ -12916,6 +13664,7 @@ zznomealeatorio ()
 # Versão: 3
 # Licença: GPL
 # Requisitos: zzminusculas
+# Nota: (ou) exiftool exiftime identify
 # ----------------------------------------------------------------------------
 zznomefoto ()
 {
@@ -12950,9 +13699,7 @@ zznomefoto ()
 				dropbox=1
 				shift
 			;;
-			*)
-				break
-			;;
+			* ) break ;;
 		esac
 	done
 
@@ -12992,7 +13739,7 @@ zznomefoto ()
 	for arquivo
 	do
 		# O arquivo existe?
-		zztool arquivo_legivel "$arquivo" || continue
+		zztool -e arquivo_legivel "$arquivo" || continue
 
 		# Componentes do nome novo
 		contagem=$(printf "%0${digitos}d" $i)
@@ -13084,7 +13831,7 @@ zznomefoto ()
 		if ! test -n "$nao"
 		then
 			# Não sobrescreve arquivos já existentes
-			zztool arquivo_vago "$novo" || return
+			zztool -e arquivo_vago "$novo" || return
 
 			# E finalmente, renomeia
 			mv -- "$arquivo" "$novo"
@@ -13093,21 +13840,102 @@ zznomefoto ()
 }
 
 # ----------------------------------------------------------------------------
+# zznome
+# http://www.significado.origem.nom.br/
+# Dicionário de nomes, com sua origem, numerologia e arcanos do tarot.
+# Pode-se filtrar por significado, origem, letra (primeira letra), tarot
+# marca (no mundo), numerologia ou tudo - como segundo argumento (opcional).
+# Por padrão lista origem e significado.
+#
+# Uso: zznome nome [significado|origem|letra|marca|numerologia|tarot|tudo]
+# Ex.: zznome maria
+#      zznome josé origem
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2011-04-22
+# Versão: 4
+# Licença: GPL
+# Requisitos: zzsemacento zzminusculas
+# ----------------------------------------------------------------------------
+zznome ()
+{
+	zzzz -h nome "$1" && return
+
+	local url='http://www.significado.origem.nom.br'
+	local ini='Qual a origem do nome '
+	local fim='Analise da Primeira Letra do Nome:'
+	local nome=$(echo "$1" | zzminusculas | zzsemacento)
+
+	# Verificação dos parâmetros
+	test -n "$1" || { zztool -e uso nome; return 1; }
+
+	case "$2" in
+		origem)
+			ini='Qual a origem do nome '
+			fim='^ *$'
+		;;
+		significado)
+			ini='Qual o significado do nome '
+			fim='^ *$'
+		;;
+		letra)
+			ini='Analise da Primeira Letra do Nome:'
+			fim='Sua marca no mundo!'
+		;;
+		marca)
+			ini='Sua marca no mundo!'
+			fim='Significado - Numerologia - Expressão'
+		;;
+		numerologia)
+			ini='Significado - Numerologia - Expressão'
+			fim=' - Arcanos do Tarot'
+		;;
+		tarot)
+			ini=' - Arcanos do Tarot'
+			fim='^VEJA TAMBÉM'
+		;;
+		tudo)
+			ini='Qual a origem do nome '
+			fim='^VEJA TAMBÉM'
+		;;
+	esac
+
+	zztool dump -i 'iso-8859-1' "$url/nomes/?q=$nome" |
+		sed -n "
+		/$ini/,/$fim/ {
+			/$fim/d
+			/\[.*: :.*\]/d
+			/\[[0-9]\{1,\}\.jpg\]/d
+			s/^ *//g
+			s/^Qual a origem/Origem/
+			s/^Qual o significado/Significado/
+			/^Significado de / {
+				N
+				d
+			}
+			p
+		}" 2>/dev/null
+		# Escondendo erros pois a codificação do site é estranha
+		# https://github.com/aureliojargas/funcoeszz/issues/27
+}
+
+# ----------------------------------------------------------------------------
 # zznoticiaslinux
 # Busca as últimas notícias sobre Linux em sites nacionais.
 # Obs.: Cada site tem uma letra identificadora que pode ser passada como
 #       parâmetro, para informar quais sites você quer pesquisar:
 #
-#         B)r Linux            N)otícias linux
-#         V)iva o Linux        U)nder linux
+#         B) Br-Linux             C) Canal Tech
+#         D) Diolinux             L) Linux Descomplicado
+#         Z) Linuxbuzz
 #
 # Uso: zznoticiaslinux [sites]
 # Ex.: zznoticiaslinux
-#      zznoticiaslinux yn
+#      zznoticiaslinux bv
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2001-12-17
-# Versão: 6
+# Versão: 10
 # Licença: GPL
 # Requisitos: zzfeed
 # ----------------------------------------------------------------------------
@@ -13117,20 +13945,11 @@ zznoticiaslinux ()
 
 	local url limite
 	local n=5
-	local sites='byvucin'
+	local sites='bcdlz'
 
 	limite="sed ${n}q"
 
 	test -n "$1" && sites="$1"
-
-	# Viva o Linux
-	if zztool grep_var v "$sites"
-	then
-		url='http://www.vivaolinux.com.br/index.rdf'
-		echo
-		zztool eco "* Viva o Linux ($url):"
-		zzfeed -n $n "$url"
-	fi
 
 	# Br Linux
 	if zztool grep_var b "$sites"
@@ -13141,21 +13960,39 @@ zznoticiaslinux ()
 		zzfeed -n $n "$url"
 	fi
 
-	# UnderLinux
-	if zztool grep_var u "$sites"
+	# Canal Tech
+	if zztool grep_var c "$sites"
 	then
-		url='https://under-linux.org/external.php?do=rss&type=newcontent&sectionid=1&days=120'
+		url='https://canaltech.com.br/rss/linux/'
 		echo
-		zztool eco "* UnderLinux ($url):"
+		zztool eco "* Canal Tech ($url):"
 		zzfeed -n $n "$url"
 	fi
 
-	# Notícias Linux
-	if zztool grep_var n "$sites"
+	# Diolinux
+	if zztool grep_var d "$sites"
 	then
-		url='http://feeds.feedburner.com/NoticiasLinux'
+		url='http://www.diolinux.com.br/feeds/posts/default/'
 		echo
-		zztool eco "* Notícias Linux ($url):"
+		zztool eco "* Diolinux ($url):"
+		zzfeed -n $n "$url"
+	fi
+
+	# Linux Descomplicado
+	if zztool grep_var l "$sites"
+	then
+		url='https://www.linuxdescomplicado.com.br/category/noticias/feed'
+		echo
+		zztool eco "* Linux Descomplicado ($url):"
+		zzfeed -n $n "$url"
+	fi
+
+	# Linuxbuzz
+	if zztool grep_var z "$sites"
+	then
+		url='http://www.linuxbuzz.com.br/feeds/posts/default?alt=rss'
+		echo
+		zztool eco "* Linuxbuzz ($url):"
 		zzfeed -n $n "$url"
 	fi
 }
@@ -13166,13 +14003,12 @@ zznoticiaslinux ()
 # Obs.: Cada site tem uma letra identificadora que pode ser passada como
 #       parâmetro, para informar quais sites você quer pesquisar:
 #
-#       Linux Security B)rasil    Linux T)oday - Security
-#       Linux S)ecurity           Security F)ocus
-#       C)ERT/CC
+#       C)ERT/CC            Linux T)oday - Security
+#       Linux S)ecurity     Security F)ocus
 #
 # Uso: zznoticiassec [sites]
 # Ex.: zznoticiassec
-#      zznoticiassec bcf
+#      zznoticiassec cft
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2003-07-13
@@ -13186,20 +14022,11 @@ zznoticiassec ()
 
 	local url limite
 	local n=5
-	local sites='bsctf'
+	local sites='sctf'
 
 	limite="sed ${n}q"
 
 	test -n "$1" && sites="$1"
-
-	# LinuxSecurity Brasil
-	if zztool grep_var b "$sites"
-	then
-		url='http://www.linuxsecurity.com.br/share.php'
-		echo
-		zztool eco "* LinuxSecurity Brasil ($url):"
-		zzfeed -n $n "$url"
-	fi
 
 	# Linux Security
 	if zztool grep_var s "$sites"
@@ -13222,7 +14049,7 @@ zznoticiassec ()
 	# Linux Today - Security
 	if zztool grep_var t "$sites"
 	then
-		url='http://feeds.feedburner.com/linuxtoday/linux'
+		url='http://feeds.feedburner.com/linuxtoday/linux/'
 		echo
 		zztool eco "* Linux Today - Security ($url):"
 		zzfeed -n $n "$url"
@@ -13231,10 +14058,10 @@ zznoticiassec ()
 	# Security Focus
 	if zztool grep_var f "$sites"
 	then
-		url='http://www.securityfocus.com/bid'
+		url='http://www.securityfocus.com/bid/'
 		echo
 		zztool eco "* SecurityFocus Vulns Archive ($url):"
-		$ZZWWWDUMP "$url" |
+		zztool dump "$url" |
 			sed -n '
 				/^ *\([0-9]\{4\}-[0-9][0-9]-[0-9][0-9]\)/ {
 					G
@@ -13281,7 +14108,7 @@ zznoticiassec ()
 # Desde: 2013-03-05
 # Versão: 13
 # Licença: GPL
-# Requisitos: zzvira
+# Requisitos: zzvira zztestar
 # ----------------------------------------------------------------------------
 zznumero ()
 {
@@ -13535,7 +14362,7 @@ zznumero ()
 
 		# Número com o "ponto decimal" separando a parte fracionária, sem separador de milhar
 		# Se for padrão 999.999, é considerado um inteiro
-		if test $qtde_p -eq 1 -a $qtde_v -eq 0 && zztool testa_numero_fracionario "$1"
+		if test $qtde_p -eq 1 -a $qtde_v -eq 0 && zztestar numero_fracionario "$1"
 		then
 			if echo "$1" | grep '^[0-9]\{1,3\}\.[0-9]\{3\}$' >/dev/null
 			then
@@ -13546,7 +14373,7 @@ zznumero ()
 		fi
 
 		# Número com a "vírgula" separando da parte fracionária, sem separador de milhares
-		if test $qtde_v -eq 1 -a $qtde_p -eq 0 && zztool testa_numero_fracionario "$1"
+		if test $qtde_v -eq 1 -a $qtde_p -eq 0 && zztestar numero_fracionario "$1"
 		then
 			numero="$1"
 		fi
@@ -14153,52 +14980,17 @@ zznumero ()
 }
 
 # ----------------------------------------------------------------------------
-# zzoperadora
-# http://consultaoperadora.com.br
-# Consulta operadora de um número de telefone fixo/celular.
-# O formato utilizado é: <DDD><NÚMERO>
-# Não utilize espaços, (), -
-# Uso: zzoperadora [número]
-# Ex.: zzoperadora 1934621026
-#
-# Autor: Mauricio Calligaris <mauriciocalligaris@gmail.com>
-# Desde: 2013-06-19
-# Versão: 3
-# Licença: GPL
-# ----------------------------------------------------------------------------
-
-zzoperadora ()
-{
-	zzzz -h operadora "$1" && return
-
-	local url="http://consultaoperadora.com.br"
-	local post="numero=$1"
-
-	# Verifica o paramentro
-	if (! zztool testa_numero "$1" || test "$1" -eq 0)
-	then
-		zztool -e uso operadora
-		return 1
-	fi
-
-	# Faz a consulta no site
-	echo "${post}&tipo=consulta" |
-	$ZZWWWPOST "$url" |
-	sed -n '/Número:/p' |
-	awk '{print $1, $2; print $3, $4; for(i=6;i<=NF;i++) {printf  $i " "}; print ""}'
-}
-
-# ----------------------------------------------------------------------------
 # zzora
 # http://ora-code.com
-# Retorna a descrição do erro Oracle (ORA-NNNNN).
+# Retorna a descrição do erro Oracle (AAA-99999).
 # Uso: zzora numero_erro
 # Ex.: zzora 1234
 #
 # Autor: Rodrigo Pereira da Cunha <rodrigopc (a) gmail.com>
 # Desde: 2005-11-03
-# Versão: 5
+# Versão: 6
 # Licença: GPL
+# Requisitos: zzurldecode
 # ----------------------------------------------------------------------------
 zzora ()
 {
@@ -14207,21 +14999,31 @@ zzora ()
 	test $# -ne 1 && { zztool -e uso ora; return 1; } # deve receber apenas um argumento
 	zztool -e testa_numero "$1" || return 1 # e este argumento deve ser numérico
 
-	local url="http://ora-$1.ora-code.com"
+	local link
+	local url='http://www.oracle.com/pls/db92/error_search?search'
+	local cod=$(printf "%05d" $1)
 
-	$ZZWWWDUMP "$url" | sed '
-		s/  //g
-		s/^ //
-		/^$/ d
-		/Subject Replies/,$d
-		1,5d
-		s/^Cause:/\
-Cause:/
-		s/^Action:/\
-Action:/
-		/Google Search/,$d
-		/^o /d
-		/\[1\.gif\]/,$d
+	zztool source "${url}=${cod}" |
+	sed -n "/to_URL.*-${cod}/{s/.*name=//;s/\">.*//;p;}" |
+	zzurldecode |
+	while read link
+	do
+		zztool dump "$link" |
+		sed -n "/^ *[A-Z0-9]\{1,\}-$cod/,/-[0-9]\{5\}[^0-9]/p" |
+		sed '/___/,$d; 2,${ /-[0-9]\{5\}[^0-9]/d; }' |
+		sed '1s/^ *//; 2,$s/^  */  /'
+		echo
+	done | awk '
+			/^[ 	]*$/{ branco++ }
+
+			! /^[ 	]*$/ {
+				if (branco==1) { print ""; branco=0 }
+				else if (branco>1)  {
+					print "===================================================================================================="
+					print ""; branco=0
+				}
+				print
+			}
 		'
 }
 
@@ -14269,7 +15071,7 @@ zzpad ()
 	done
 
 	# Tamanho da string
-	if zztool testa_numero "$1" && test $1 -gt 0
+	if zztool testa_numero "$1" && test "$1" -gt 0
 	then
 		largura="$1"
 		shift
@@ -14290,10 +15092,10 @@ zzpad ()
 	zztool multi_stdin "$@" |
 		zztool nl_eof |
 		case "$posicao" in
-			l) sed -e ':loop' -e "/^.\{$largura\}/ b" -e "s/^/$str_pad/" -e 'b loop';;
-			r) sed -e ':loop' -e "/^.\{$largura\}/ b" -e "s/$/$str_pad/" -e 'b loop';;
-			b) sed -e ':loop' -e "/^.\{$largura\}/ b" -e "s/$/$str_pad/" \
-			                  -e "/^.\{$largura\}/ b" -e "s/^/$str_pad/" -e 'b loop';;
+			l) sed -e ':loop'	-e "/^.\{$largura\}/ b" -e "s/^/$str_pad/" -e 'b loop';;
+			r) sed -e ':loop'	-e "/^.\{$largura\}/ b" -e "s/$/$str_pad/" -e 'b loop';;
+			b) sed -e ':loop'	-e "/^.\{$largura\}/ b" -e "s/$/$str_pad/" \
+								-e "/^.\{$largura\}/ b" -e "s/^/$str_pad/" -e 'b loop';;
 		esac
 
 	### Explicação do algoritmo sed
@@ -14305,7 +15107,6 @@ zzpad ()
 
 # ----------------------------------------------------------------------------
 # zzpais
-# http://pt.wikipedia.org/wiki/Lista_de_pa%C3%ADses_e_capitais_em_l%C3%ADnguas_locais
 # Lista os países.
 # Opções:
 #  -a: Todos os países
@@ -14322,24 +15123,24 @@ zzpad ()
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-03-29
-# Versão: 3
+# Versão: 4
 # Licença: GPL
-# Requisitos: zzlinha
+# Requisitos: zzlinha zzpad
 # ----------------------------------------------------------------------------
 zzpais ()
 {
 	zzzz -h pais "$1" && return
 
-	local url='http://pt.wikipedia.org/wiki/Lista_de_pa%C3%ADses_e_capitais_em_l%C3%ADnguas_locais'
+	local url='https://pt.wikipedia.org/wiki/Lista_de_pa%C3%ADses_e_capitais_em_l%C3%ADnguas_locais'
 	local cache=$(zztool cache pais)
 	local original=0
 	local idioma=0
-	local padrao
+	local padrao linha field1 field2
 
 	# Se o cache está vazio, baixa-o da Internet
 	if ! test -s "$cache"
 	then
-		$ZZWWWHTML "$url" |
+		zztool source "$url" |
 		sed -n '/class="wikitable"/,/<\/table>/p' |
 		sed '/<th/d;s|</td>|:|g;s|</tr>|--n--|g;s|<br */*>|, |g;s/<[^>]*>//g;s/([^)]*)//g;s/\[.\]//g' |
 		awk '{
@@ -14371,12 +15172,12 @@ zzpais ()
 			BEGIN {
 				FS=":"
 				if (original_awk == 0) {
-					printf "%-42s %-35s\n", "País", "Capital"
-					print "------------------------------------------ ----------------------------------"
+					printf "%s|%s\n", "País", "Capital"
+					print "------------------------------------------|----------------------------------"
 				}
 			}
 			{
-			if (original_awk == 0) { printf "%-42s %-35s\n", $1, $2 }
+			if (original_awk == 0) { printf "%s|%s\n", $1, $2 }
 			else {
 				print "País     : " $3
 				print "Capital  : " $4
@@ -14391,10 +15192,10 @@ zzpais ()
 		awk -v idioma_awk="$idioma" -v original_awk="$original" '
 			BEGIN {FS=":"}
 			{	if (NR==1 && original_awk == 0) {
-					printf "%-42s %-35s\n", "País", "Capital"
-					print "------------------------------------------ ----------------------------------"
+					printf "%s|%s\n", "País", "Capital"
+					print "------------------------------------------|----------------------------------"
 				}
-				if (original_awk == 0) { printf "%-42s %-35s\n", $1, $2 }
+				if (original_awk == 0) { printf "%s|%s\n", $1, $2 }
 				else {
 					print "País     : " $3
 					print "Capital  : " $4
@@ -14402,7 +15203,21 @@ zzpais ()
 				if (idioma_awk == 1) { print "Idioma(s):", $5 }
 				if (idioma_awk == 1 || original_awk == 1) print ""
 			}'
-	fi
+	fi |
+	while read linha
+	do
+		if zztool grep_var "|" "$linha"
+		then
+			field1=$(echo "$linha" | cut -f1 -d '|')
+			field2=$(echo "$linha" | cut -f2 -d '|')
+			echo "$(zzpad 42 $field1) $field2"
+		else
+			echo "$linha"
+			unset field1
+			unset field2
+		fi
+	done |
+	sed 's/  *$//'
 }
 
 # ----------------------------------------------------------------------------
@@ -14624,9 +15439,9 @@ zzpascoa ()
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-05-11
-# Versão: 2
+# Versão: 4
 # Licença: GPL
-# Requisitos: zzunescape
+# Requisitos: zztrim zzsqueeze
 # ----------------------------------------------------------------------------
 zzpgsql ()
 {
@@ -14638,24 +15453,30 @@ zzpgsql ()
 
 	if ! test -s "$cache"
 	then
-		$ZZWWWHTML "${url}/sql-commands.html" |
-		awk '{printf "%s",$0; if ($0 ~ /<\/dt>/) {print ""} }'|
-		zzunescape --html | sed -n '/<dt>/p' | sed 's/  */ /g' |
-		awk -F'"' '{ printf "%3s %s\n", NR, substr($3,2) ":" $2 }' |
-		sed 's/<[^>]*>//g;s/^>/ /g' > $cache
+		zztool source "${url}/sql-commands.html" |
+		awk '/<dt>/,/<\/dt>/{if ($0 ~ /<dt>/) printf "%3s:", ++i; printf $0; if ($0 ~ /<\/dt>/) print ""}' |
+		sed 's/<a href=[^"]*"//;s/\.html">/.html:/;s/<[^>]*>//g;s/: */:/' |
+		zztrim |
+		zzsqueeze > $cache
 	fi
 
 	if test -n "$1"
 	then
 		if zztool testa_numero $1
 		then
-			comando=$(cat $cache | sed -n "/^ *${1} /p" | cut -f2 -d":")
-			$ZZWWWDUMP "${url}/${comando}" | sed -n '/^ *__*/,/^ *__*/p' | sed '1d;$d'
+			comando=$(sed -n "/^ *${1}:/{s///;s/:.*//;p;}" $cache)
+			zztool dump "${url}/${comando}" |
+			awk '
+				$0  ~ /^$/  { branco++; if (branco == 3) { print "----------"; branco = 0 } }
+				$0 !~ /^$/  { for (i=1;i<=branco;i++) { print "" }; print ; branco = 0 }
+			' |
+			sed -n '/^ *[_-][_-][_-][_-]*/,/^ *[_-][_-][_-][_-]*/p' |
+			sed '1d;$d;' | zztrim -V | sed '1s/^ *//;s/        */       /'
 		else
-			grep -i $1 $cache | cut -f1 -d":"
+			grep -i $1 $cache | awk -F: '{printf "%3s %s\n", $1, $3}'
 		fi
 	else
-		cat "$cache" | cut -f1 -d":"
+		cat "$cache" | awk -F: '{printf "%3s %s\n", $1, $3}'
 	fi
 }
 
@@ -14674,7 +15495,7 @@ zzpgsql ()
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-03-06
-# Versão: 2
+# Versão: 3
 # Licença: GPL
 # Requisitos: zzunescape
 # ----------------------------------------------------------------------------
@@ -14703,7 +15524,9 @@ zzphp ()
 			end=$(cat "$cache" | grep -h -i -- "^$funcao " | cut -f 2 -d"|")
 			# Prevenir casos como do zlib://
 			funcao=$(echo "$funcao" | sed 's|//||g')
-			test $? -eq 0 && $ZZWWWDUMP "${url}/${end}" | sed -n "/^${funcao}/,/add a note add a note/p" | sed '$d;/___*$/,$d'
+			test $? -eq 0 && zztool dump "${url}/${end}" |
+			sed -n "/^ *${funcao}/,/add a note add a note/{p; /add a note/q; }" |
+			sed '$d; /[_-][_-][_-][_-]*$/,$d; s/        */       /'
 		fi
 	else
 		# Se o cache está vazio, baixa listagem da Internet
@@ -14711,7 +15534,7 @@ zzphp ()
 		then
 			# Formato do arquivo:
 			# nome da função - descrição da função : link correspondente
-			$ZZWWWHTML "$url" | sed -n '/class="index"/p' |
+			zztool source "$url" | sed -n '/class="index"/p' |
 			awk -F'"' '{print substr($5,2) "|" $2}' |
 			sed 's/<[^>]*>//g' |
 			zzunescape --html > "$cache"
@@ -14725,25 +15548,6 @@ zzphp ()
 			cat "$cache" | cut -f 1 -d"|"
 		fi
 	fi
-}
-
-# ----------------------------------------------------------------------------
-# zzpiada
-# http://www.xalexandre.com.br/
-# Mostra uma piada diferente cada vez que é chamada.
-# Uso: zzpiada
-# Ex.: zzpiada
-#
-# Autor: Alexandre Brodt Fernandes, www.xalexandre.com.br
-# Desde: 2008-12-29
-# Versão: 3
-# Licença: GPL
-# ----------------------------------------------------------------------------
-zzpiada ()
-{
-	zzzz -h piada "$1" && return
-	$ZZWWWDUMP 'http://www.xalexandre.com.br/piadasAleiatorias/' |
-		sed 's/^ *//'
 }
 
 # ----------------------------------------------------------------------------
@@ -14767,6 +15571,7 @@ zzpiada ()
 # Versão: 6
 # Licença: GPL
 # Requisitos: zzextensao zzminusculas zzunescape zzxml
+# Nota: (ou) afplay play mplayer cvlc avplay ffplay mpg321 mpg123 ogg123
 # ----------------------------------------------------------------------------
 zzplay ()
 {
@@ -14888,6 +15693,7 @@ zzplay ()
 # Desde: 2008-12-11
 # Versão: 6
 # Licença: GPL
+# Requisitos: zztestar
 # ----------------------------------------------------------------------------
 zzporcento ()
 {
@@ -14904,13 +15710,13 @@ zzporcento ()
 	test -n "$1" || { zztool -e uso porcento; return 1; }
 
 	# Remove os pontos dos dinheiros para virarem fracionários (1.234,00 > 1234,00)
-	zztool testa_dinheiro "$valor1" && valor1=$(echo "$valor1" | sed 's/\.//g')
-	zztool testa_dinheiro "$valor2" && valor2=$(echo "$valor2" | sed 's/\.//g')
+	zztestar dinheiro "$valor1" && valor1=$(echo "$valor1" | sed 's/\.//g')
+	zztestar dinheiro "$valor2" && valor2=$(echo "$valor2" | sed 's/\.//g')
 
 	### Vamos analisar o primeiro valor
 
 	# Número fracionário (1.2345 ou 1,2345)
-	if zztool testa_numero_fracionario "$valor1"
+	if zztestar numero_fracionario "$valor1"
 	then
 		separador=$(echo "$valor1" | tr -d 0-9)
 		escala=$(echo "$valor1" | sed 's/.*[.,]//')
@@ -14943,7 +15749,7 @@ zzporcento ()
 		fi
 
 		# Porcentagem fracionada
-		if zztool testa_numero_fracionario "$porcentagem"
+		if zztestar numero_fracionario "$porcentagem"
 		then
 			# Se o valor é inteiro (escala=0) e a porcentagem fracionária,
 			# é preciso forçar uma escala para que o resultado apareça correto.
@@ -14966,7 +15772,7 @@ zzporcento ()
 		# Sempre usar o ponto como separador interno (para os cálculos)
 
 		# Número fracionário
-		if zztool testa_numero_fracionario "$valor2"
+		if zztestar numero_fracionario "$valor2"
 		then
 			separador=$(echo "$valor2" | tr -d 0-9)
 			valor2=$(echo "$valor2" | sed 'y/,/./')
@@ -15044,11 +15850,11 @@ zzporta ()
 {
 	zzzz -h porta "$1" && return
 
-	local url="http://pt.wikipedia.org/wiki/Lista_de_portas_de_protocolos"
+	local url="https://pt.wikipedia.org/wiki/Lista_de_portas_de_protocolos"
 	local port=$1
 	zztool testa_numero $port || port='.'
 
-	$ZZWWWHTML "$url" |
+	zztool source "$url" |
 	awk '/"wikitable"/,/<\/table>/ { sub (/ bgcolor.*>/,">"); print }' |
 	zzjuntalinhas -d '' -i '<tr>' -f '</tr>' |
 	awk -F '</?t[^>]+>' 'BEGIN {OFS="\t"}{ print $3, $5 }' |
@@ -15067,26 +15873,26 @@ zzporta ()
 
 # ----------------------------------------------------------------------------
 # zzpronuncia
-# http://www.m-w.com
 # Fala a pronúncia correta de uma palavra em inglês.
 # Uso: zzpronuncia palavra
 # Ex.: zzpronuncia apple
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2002-04-10
-# Versão: 3
+# Versão: 5
 # Licença: GPL
-# Requisitos: zzplay
+# Requisitos: zzplay zzunescape
+# Nota: opcional say
 # ----------------------------------------------------------------------------
 zzpronuncia ()
 {
 	zzzz -h pronuncia "$1" && return
 
-	local wav_file wav_dir wav_url
+	local audio_file
 	local palavra=$1
-	local cache=$(zztool cache pronuncia "$palavra.wav")
-	local url='http://www.m-w.com/dictionary'
-	local url2='http://cougar.eb.com/soundc11'
+	local cache=$(zztool cache pronuncia "$palavra.mp3")
+	local url='http://www.merriam-webster.com/dictionary'
+	local url2='http://media.merriam-webster.com/audio/prons'
 
 	# Verificação dos parâmetros
 	test -n "$1" || { zztool -e uso pronuncia; return 1; }
@@ -15098,33 +15904,26 @@ zzpronuncia ()
 		return
 	fi
 
-	# Busca o arquivo WAV na Internet caso não esteja no cache
+	# Busca o arquivo MP3 na Internet caso não esteja no cache
 	if ! test -f "$cache"
 	then
 		# Extrai o nome do arquivo no site do dicionário
-		wav_file=$(
-			$ZZWWWHTML "$url/$palavra" |
-			sed -n "/.*return au('\([a-z0-9]\{1,\}\)'.*/{s//\1/p;q;}")
+		audio_file=$(
+			zztool source "$url/$palavra" |
+			sed -n '/data-file=/{s/.*href="//;s/".*//;p;q;}' |
+			zzunescape --html |
+			awk -F '[=_&]' '{print $3 "/" $4 "/mp3/" $6 "/" $8 ".mp3"}'
+		)
 
 		# Ops, não extraiu nada
-		if test -z "$wav_file"
+		if test -z "$audio_file"
 		then
 			zztool erro "$palavra: palavra não encontrada"
 			return 1
-		else
-			wav_file="${wav_file}.wav"
 		fi
 
-		# O nome da pasta é a primeira letra do arquivo (/a/apple001.wav)
-		# Ou "number" se iniciar com um número (/number/9while01.wav)
-		wav_dir=$(echo $wav_file | cut -c1)
-		echo $wav_dir | grep '[0-9]' >/dev/null && wav_dir='number'
-
 		# Compõe a URL do arquivo e salva-o localmente (cache)
-		wav_url="$url2/$wav_dir/$wav_file"
-		echo "URL: $wav_url"
-		$ZZWWWHTML "$wav_url" > "$cache"
-		echo "Gravado o arquivo '$cache'"
+		zztool source "$url2/$audio_file" > "$cache"
 	fi
 
 	# Fala que eu te escuto
@@ -15158,7 +15957,7 @@ zzquimica ()
 	# Se o cache está vazio, baixa listagem da Internet
 	if ! test -s "$cache"
 	then
-		$ZZWWWHTML "http://www.tabelaperiodicacompleta.com/" |
+		zztool source "http://www.tabelaperiodicacompleta.com/" |
 		awk '/class="elemento/,/<\/td>/{print}'|
 		zzxml --untag=br | zzxml --tidy |
 		sed '/id="57-71"/,/<\/td>/d;/id="89-103"/,/<\/td>/d' |
@@ -15191,6 +15990,13 @@ zzquimica ()
 			/^<small/   { getline info["orbital"]; gsub(/ /, "-", info["orbital"]) }
 			/^<\/td>/ { print info["numero"], info["nome"], info["simbolo"], info["massa"], info["orbital"], info["familia"] " (" info["estado"] ")" }
 		' |
+		# Correção para elmentos novos descobertos e recentemente reclassificados
+		sed '
+			s/Ununtrio/Nihonium/; s/Uut/Nh/
+			s/Ununpentio/Moscovium/; s/Uup/Mc/
+			s/Ununséptio/Tennessine/; s/Uus/Ts/
+			s/Ununóctio/Oganesson/; s/Uuo/Og/
+			' |
 		sort -n |
 		while IFS=':' read numero nome simbolo massa orbital familia
 		do
@@ -15251,117 +16057,11 @@ zzramones ()
 	# Se o cache está vazio, baixa listagem da Internet
 	if ! test -s "$cache"
 	then
-		$ZZWWWDUMP "$url" > "$cache"
+		zztool download "$url" "$cache"
 	fi
 
 	# Mostra uma linha qualquer (com o padrão, se informado)
 	zzlinha -t "${padrao:-.}" "$cache"
-}
-
-# ----------------------------------------------------------------------------
-# zzrandbackground
-# Muda aleatoriamente o background do GNOME.
-# A opção -l faz o script entrar em loop.
-# ATENÇÃO: o caminho deve conter a última / para que funcione:
-#   /wallpaper/ <- funciona
-#   /wallpaper  <- não funciona
-#
-# Uso: zzrandbackground -l <caminho_wallpapers> <segundo>
-# Ex.: zzrandbackground /media/wallpaper/
-#      zzrandbackground -l /media/wallpaper/ 5
-#
-# Autor: Marcell S. Martini <marcellmartini (a) gmail com>
-# Desde: 2008-12-12
-# Versão: 1
-# Licença: GPLv2
-# Requisitos: zzshuffle gconftool
-# ----------------------------------------------------------------------------
-zzrandbackground ()
-{
-
-	zzzz -h randbackground "$1" && return
-
-	local caminho tempo papeisdeparede background
-	local opcao caminho segundos loop
-
-	# Tratando os parametros
-	# foi passado -l
-	if test "$1" = "-l";then
-
-		# Tem todos os parametros, caso negativo
-		# mostra o uso da funcao
-		if test $# != "3"; then
-			zztool -e uso randbackground
-			return 1
-		fi
-
-		# Ok é loop
-		loop=1
-
-		# O caminho é valido, caso negativo
-		# mostra o uso da funcao
-		if test -d $2; then
-			caminho=$2
-		else
-			zztool -e uso randbackground
-			return 1
-		fi
-
-		# A quantidade de segundos é inteira
-		# caso negativo mostra o uso da funcao
-		if zztool testa_numero $3; then
-			segundos=$3
-		else
-			zztool -e uso randbackground
-			return 1
-		fi
-	else
-		# Caso nao seja passado o -l, só tem o camiho
-		# caso negativo mostra o uso da funcao
-		if test $# != "1"; then
-			zztool -e uso randbackground
-			return 1
-		fi
-
-		# O caminho é valido, caso negativo
-		# mostra o uso da funcao
-		if test -d $2; then
-			caminho=$1
-		else
-			zztool -e uso randbackground
-			return 1
-		fi
-	fi
-
-	# Ok parametros tratados, vamos pegar
-	# as imagens dentro do "$caminho"
-	papeisdeparede=$(
-				find -L $caminho -type f -exec file {} \; |
-				grep -i image |
-				cut -d: -f1
-			)
-
-	# Agora a execução
-	# Foi passado -l, então entra em loop infinito
-	if test -n "$loop";then
-		while test "1"
-		do
-			background=$( echo "$papeisdeparede" |
-				zzshuffle |
-				head -1
-				)
-			gconftool-2 --type string --set /desktop/gnome/background/picture_filename "$background"
-			sleep $segundos
-		done
-
-	# não, não foi passado -l, então só troca 1x.
-	else
-		background=$( echo "$papeisdeparede" |
-				zzshuffle |
-				head -1
-			)
-		gconftool-2 --type string --set /desktop/gnome/background/picture_filename "$background"
-	fi
 }
 
 # ----------------------------------------------------------------------------
@@ -15374,8 +16074,9 @@ zzrandbackground ()
 #
 # Autor: Frederico Freire Boaventura <anonymous (a) galahad com br>
 # Desde: 2007-06-25
-# Versão: 3
+# Versão: 4
 # Licença: GPL
+# Requisitos: zztrim zzunescape zzxml zzjuntalinhas
 # ----------------------------------------------------------------------------
 zzrastreamento ()
 {
@@ -15383,7 +16084,7 @@ zzrastreamento ()
 
 	test -n "$1" || { zztool -e uso rastreamento; return 1; }
 
-	local url='http://websro.correios.com.br/sro_bin/txect01$.QueryList'
+	local url='http://www2.correios.com.br/sistemas/rastreamento/resultado_semcontent.cfm?'
 
 	# Para cada código recebido...
 	for codigo
@@ -15391,83 +16092,89 @@ zzrastreamento ()
 		# Só mostra o código se houver mais de um
 		test $# -gt 1 && zztool eco "**** $codigo"
 
-		$ZZWWWDUMP "$url?P_LINGUA=001&P_TIPO=001&P_COD_UNI=$codigo" |
-			sed '
-				/ Data /,/___/ !d
-				/___/d
-				s/^   //'
+		curl -s $url -d "objetos=$codigo" |
+			iconv -f iso-8859-1 -t utf-8 |
+			zzxml --tag tr |
+			zztrim |
+			zzunescape --html |
+			sed '/^ *$/d' |
+			zzjuntalinhas -i '<tr' -f '</tr>' |
+			zzxml --untag |
+			tr -s '\t' |
+			expand -t 1,13,20 |
+			zztrim
 
 		# Linha em branco para separar resultados
-		test $# -gt 1 && echo
+		test $# -gt 1 && echo || :
 	done
 }
 
 # ----------------------------------------------------------------------------
-# zzrelansi
-# Coloca um relógio digital (hh:mm:ss) no canto superior direito do terminal.
-# Uso: zzrelansi [-s|--stop]
-# Ex.: zzrelansi
+# zzrepete
+# Repete um dado texto na quantidade de vezes solicitada.
+# Com a opção -l ou --linha cada repetição é uma nova linha.
 #
-# Autor: Arkanon <arkanon (a) lsd org br>
-# Desde: 2009-09-17
-# Versão: 2
+# Uso: zzrepete [-l | --linha] <repetições> <texto>
+# Ex.: zzrepete 15 Foo     # FooFooFooFooFooFooFooFooFooFooFooFooFooFooFoo
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2016-04-12
+# Versão: 1
 # Licença: GPL
+# Requisitos: zzseq
 # ----------------------------------------------------------------------------
-zzrelansi ()
+zzrepete ()
 {
+	zzzz -h repete "$1" && return
 
-	zzzz -h relansi "$1" && return
+	test -n "$1" || { zztool -e uso repete; return 1; }
 
-	case $1 in
-	-s | --stop)
-		shopt -q
-		if test -n "$relansi_pid"
-		then
-			kill $relansi_pid
-			relansi_write
-			unset relansi_cols relansi_pid relansi_write
-		else
-			echo "RelANSI não está sendo executado"
-		fi
-	;;
-	*)
-		if test -n "$relansi_pid"
-		then
-			echo "RelANSI já está sendo executado pelo processo $relansi_pid"
-		else
-			relansi_cols=$(tput cols)
-			relansi_write()
-				{
-				tput sc
-				tput cup 0 $[$relansi_cols-8]
-				test -n "$1" && date +'%H:%M:%S' || echo '        '
-				tput rc
-				}
-			exec 3>&2 2> /dev/null
-			while true
-			do
-				relansi_write start
-				sleep 1
-			done &
-			relansi_pid=$!
-			disown $relansi_pid # RESTRICAO: builtin no bash e zsh, mas nao no csh e ksh
-			exec 2>&3
-		fi
-	;;
-	esac
+	# Definindo variáveis
+	local linha i qtde
 
+	# Uma repetição por linha
+	if test "$1" = "-l" -o "$1" = "--linha"
+	then
+		linha='\n'
+		shift
+	fi
+
+	# Ao menos 2 parâmetros: Número de repetições e o resto o que vai ser repetido
+	test $# -ge 2 || { zztool -e uso repete; return 1; }
+
+	# Se preenche os requesitos, vamos em frente.
+	if zztool testa_numero "$1" && test "$1" -gt 0
+	then
+		qtde="$1"
+		shift
+
+		# É aqui que acontece, o código é auto-explicativo :)
+		for i in $(zzseq $qtde)
+		do
+			printf "$*${linha}"
+		done |
+		zztool nl_eof
+
+	else
+		# Ops! Deu algum erro.
+		zztool erro "Número inválido para repetições: $1"
+		return 1
+	fi
 }
 
 # ----------------------------------------------------------------------------
 # zzromanos
-# Conversor de números romanos para indo-arábicos e vice-versa.
+# Conversor de números romanos para hindu-arábicos e vice-versa.
+# Converte corretamente para romanos números até 3999999.
+# Converte corretamente para hindu-arábicos números até 4000.
+#
 # Uso: zzromanos número
 # Ex.: zzromanos 1987                # Retorna: MCMLXXXVII
 #      zzromanos XLIII               # Retorna: 43
 #
-# Autor: Guilherme Magalhães Gall <gmgall (a) gmail com> twitter: @gmgall
+# Autor: Guilherme Magalhães Gall <gmgall (a) gmail com>
 # Desde: 2011-07-19
-# Versão: 3
+# Versão: 4
 # Licença: GPL
 # Requisitos: zzmaiusculas zztac
 # ----------------------------------------------------------------------------
@@ -15476,6 +16183,21 @@ zzromanos ()
 	zzzz -h romanos "$1" && return
 
 	local arabicos_romanos="\
+	1000000:M̄
+	900000:C̄M̄
+	500000:D̄
+	400000:C̄D̄
+	100000:C̄
+	90000:X̄C̄
+	50000:Ḹ
+	40000:X̄Ḹ
+	10000:X̄
+	9000:ĪX̄
+	8000:V̄ĪĪĪ
+	7000:V̄ĪĪ
+	6000:V̄Ī
+	5000:V̄
+	4000:ĪV̄
 	1000:M
 	900:CM
 	500:D
@@ -15497,18 +16219,18 @@ zzromanos ()
 	local comprimento
 	# Regex que valida um número romano de acordo com
 	# http://diveintopython.org/unit_testing/stage_5.html
-	local regex_validacao='^M?M?M?(CM|CD|D?C?C?C?)(XC|XL|L?X?X?X?)(IX|IV|V?I?I?I?)$'
+	local regex_validacao='^(M{0,4})(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$'
 
 	# Se nenhum argumento for passado, mostra lista de algarismos romanos
-	# e seus correspondentes indo-arábicos
+	# e seus correspondentes hindu-arábicos
 	if test $# -eq 0
 	then
 		echo "$arabicos_romanos" |
-		grep -v :.. | tr -d '\t' | tr : '\t' |
+		egrep '[15]|4000:' | tr -d '\t' | tr : '\t' |
 		zztac
 
 	# Se é um número inteiro positivo, transforma para número romano
-	elif zztool testa_numero "$entrada"
+	elif zztool testa_numero "$entrada" && test "$entrada" -lt 4000000
 	then
 		echo "$arabicos_romanos" | { while IFS=: read arabico romano
 		do
@@ -15518,11 +16240,11 @@ zzromanos ()
 				entrada=$((entrada-arabico))
 			done
 		done
-		echo "$saida"
+		test "$1" -ge 4000 && printf "\n$saida\n\n" || echo "$saida"
 		}
 
 	# Se é uma string que representa um número romano válido,
-	# converte para indo-arábico
+	# converte para hindu-arábico
 	elif echo "$entrada" | egrep "$regex_validacao" > /dev/null
 	then
 		saida=0
@@ -15601,14 +16323,14 @@ zzrot47 ()
 # zzrpmfind
 # http://rpmfind.net/linux
 # Procura por pacotes RPM em várias distribuições de Linux.
-# Obs.: A arquitetura padrão de procura é a i386.
+# Obs.: A arquitetura padrão de procura é a i586.
 # Uso: zzrpmfind pacote [distro] [arquitetura]
 # Ex.: zzrpmfind sed
 #      zzrpmfind lilo mandr i586
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2002-02-22
-# Versão: 2
+# Versão: 3
 # Licença: GPL
 # ----------------------------------------------------------------------------
 zzrpmfind ()
@@ -15618,21 +16340,20 @@ zzrpmfind ()
 	local url='http://rpmfind.net/linux/rpm2html/search.php'
 	local pacote=$1
 	local distro=$2
-	local arquitetura=${3:-i386}
+	local arquitetura=${3:-i586}
 
 	# Verificação dos parâmetros
 	test -n "$1" || { zztool -e uso rpmfind; return 1; }
 
 	# Faz a consulta e filtra o resultado
 	resultado=$(
-		$ZZWWWLIST "$url?query=$pacote&submit=Search+...&system=$distro&arch=$arquitetura" |
-			sed -n '/ftp:\/\/rpmfind/ s@^[^A-Z]*/linux/@  @p' |
+		zztool list "$url?query=$pacote&submit=Search+...&system=$distro" |
+			grep --color=never "[^.]*$arquitetura[^.]*.rpm$" |
 			sort
 	)
 
 	if test -n "$resultado"
 	then
-		zztool eco 'ftp://rpmfind.net/linux/'
 		echo "$resultado"
 	fi
 }
@@ -15641,18 +16362,18 @@ zzrpmfind ()
 # zzsecurity
 # Mostra os últimos 5 avisos de segurança de sistemas de Linux/UNIX.
 # Suportados:
-#  Debian, Ubuntu, FreeBSD, NetBSD, Gentoo, Arch, Mandriva, Mageia,
-#  Slackware, Suse (OpenSuse), RedHat, Fedora.
+#  Debian, Ubuntu, FreeBSD, NetBSD, Gentoo, Arch, Mageia,
+#  Slackware, Suse, OpenSuse, Fedora.
 # Uso: zzsecurity [distros]
-# Ex.: zzsecutiry
-#      zzsecurity mandriva
+# Ex.: zzsecurity
+#      zzsecurity mageia
 #      zzsecurity debian gentoo
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2004-12-23
-# Versão: 11
+# Versão: 12
 # Licença: GPL
-# Requisitos: zzminusculas zzfeed zztac zzurldecode zzdata zzdatafmt
+# Requisitos: zzminusculas zzfeed zztac zzdata zzdatafmt
 # ----------------------------------------------------------------------------
 zzsecurity ()
 {
@@ -15661,7 +16382,7 @@ zzsecurity ()
 	local url limite distros
 	local n=5
 	local ano=$(date '+%Y')
-	local distros='debian freebsd gentoo mandriva slackware suse opensuse ubuntu redhat arch mageia netbsd fedora'
+	local distros='debian freebsd gentoo slackware suse opensuse ubuntu arch mageia netbsd fedora'
 
 	limite="sed ${n}q"
 
@@ -15674,7 +16395,7 @@ zzsecurity ()
 		echo
 		zztool eco '** Atualizações Debian'
 		echo "$url"
-		$ZZWWWDUMP "$url" |
+		zztool dump "$url" |
 			sed -n '
 				/Security Advisories/,/_______/ {
 					/\[[0-9]/ s/^ *//p
@@ -15689,7 +16410,7 @@ zzsecurity ()
 		zztool eco '** Atualizações Slackware'
 		url="http://www.slackware.com/security/list.php?l=slackware-security&y=$ano"
 		echo "$url"
-		$ZZWWWDUMP "$url" |
+		zztool dump "$url" |
 			sed '
 				/[0-9]\{4\}-[0-9][0-9]/!d
 				s/\[sla.*ty\]//
@@ -15704,7 +16425,7 @@ zzsecurity ()
 		zztool eco '** Atualizações Gentoo'
 		url='http://www.gentoo.org/security/en/index.xml'
 		echo "$url"
-		$ZZWWWDUMP "$url" |
+		zztool dump "$url" |
 			sed -n '
 				s/^  *//
 				/^GLSA/, /^$/ !d
@@ -15715,16 +16436,6 @@ zzsecurity ()
 			$limite
 	fi
 
-	# Mandriva
-	if zztool grep_var mandriva "$distros"
-	then
-		echo
-		zztool eco '** Atualizações Mandriva'
-		url='http://www.mandriva.com/en/support/security/advisories/feed/'
-		echo "$url"
-		zzfeed -n $n "$url"
-	fi
-
 	# Suse
 	if zztool grep_var suse "$distros" || zztool grep_var opensuse "$distros"
 	then
@@ -15732,7 +16443,7 @@ zzsecurity ()
 		zztool eco '** Atualizações Suse'
 		url='https://www.suse.com/support/update/'
 		echo "$url"
-		$ZZWWWDUMP "$url" |
+		zztool dump "$url" |
 			grep 'SUSE-SU' |
 			sed 's/^.*\(SUSE-SU\)/ \1/;s/\(.*\) \([A-Z].. .., ....\)$/\2\1/ ; s/  *$//' |
 			$limite
@@ -15741,7 +16452,7 @@ zzsecurity ()
 		zztool eco '** Atualizações Opensuse'
 		url="http://lists.opensuse.org/opensuse-updates/$(zzdata hoje - 1m | zzdatafmt -f AAAA-MM) http://lists.opensuse.org/opensuse-updates/$(zzdatafmt -f AAAA-MM hoje)"
 		echo "$url"
-		$ZZWWWDUMP $url |
+		zztool dump $url |
 			grep 'SUSE-SU' |
 			sed 's/^ *\* //;s/ [0-9][0-9]:[0-9][0-9]:[0-9][0-9] GMT/,/;s/  *$//' |
 			zztac |
@@ -15765,8 +16476,7 @@ zzsecurity ()
 		zztool eco '** Atualizações NetBSD'
 		url='http://ftp.netbsd.org/pub/NetBSD/packages/vulns/pkg-vulnerabilities'
 		echo "$url"
-		$ZZWWWDUMP "$url" |
-			zzurldecode |
+		zztool dump "$url" |
 			sed '1,27d;/#CHECKSUM /,$d;s/ *https*:.*//' |
 			zztac |
 			$limite
@@ -15782,28 +16492,6 @@ zzsecurity ()
 		zzfeed -n $n "$url"
 	fi
 
-	# Red Hat
-	if zztool grep_var redhat "$distros"
-	then
-		url='https://access.redhat.com/security/cve'
-		echo
-		zztool eco '** Atualizações Red Hat'
-		echo "$url"
-		$ZZWWWDUMP "$url" |
-			sed -n '
-				/^ *CVE-/ {
-					/\* RESERVED \*/ d
-					/Details pending/ d
-					s/ [[:alpha:]]\{1,\} [0-9-]\{1,\}$//
-					s/^  *//
-					p
-				}' |
-			zztac |
-			$limite |
-			sed 's/ /:\
-	/'
-	fi
-
 	# Fedora
 	if zztool grep_var fedora "$distros"
 	then
@@ -15811,7 +16499,7 @@ zzsecurity ()
 		zztool eco '** Atualizações Fedora'
 		url='http://lwn.net/Alerts/Fedora/'
 		echo "$url"
-		$ZZWWWDUMP "$url" |
+		zztool dump "$url" |
 			grep 'FEDORA-' |
 			sed 's/^ *//' |
 			$limite
@@ -15820,23 +16508,13 @@ zzsecurity ()
 	# Arch
 	if zztool grep_var arch "$distros"
 	then
-		url="https://wiki.archlinux.org/index.php/CVE"
+		url="https://security.archlinux.org/"
 		echo
 		zztool eco '** Atualizações Archlinux'
 		echo "$url"
-		$ZZWWWDUMP "$url" |
-			sed -n "/^ *CVE-${ano}-[0-9]/{s/templink //;p;}" |
-			$limite
-	fi
-
-	# Mageia
-	if zztool grep_var mageia "$distros"
-	then
-		url='http://advisories.mageia.org/advisories.rss'
-		echo
-		zztool eco '** Atualizações Mageia'
-		echo "$url"
-		zzfeed -n $n "$url"
+		zztool dump "$url" |
+			awk '/ AVG-/{++i;print"";sub(/^ */,"")};i>=6{exit}i;' |
+			sed '/AVG.* CVE/ {s/ CVE/\n   CVE/}'
 	fi
 }
 
@@ -15963,6 +16641,7 @@ zzsenha ()
 # Desde: 2002-12-06
 # Versão: 1
 # Licença: GPL
+# Requisitos: zztestar
 # ----------------------------------------------------------------------------
 zzseq ()
 {
@@ -15995,9 +16674,9 @@ zzseq ()
 	test -n "$3" && inicio="$1" passo="$2" fim="$3"
 
 	# Verificações básicas
-	zztool -e testa_numero_sinal "$inicio" || return 1
-	zztool -e testa_numero_sinal "$passo"  || return 1
-	zztool -e testa_numero_sinal "$fim"    || return 1
+	zztestar -e numero_sinal "$inicio" || return 1
+	zztestar -e numero_sinal "$passo"  || return 1
+	zztestar -e numero_sinal "$fim"    || return 1
 	if test "$passo" -eq 0
 	then
 		zztool erro "O passo não pode ser zero."
@@ -16057,6 +16736,52 @@ zzsextapaixao ()
 	# e quando já temos o código e só precisamos mudar os numeros
 	# tambem é bom :D ;)
 	zzdata $(zzpascoa $ano) - 2
+}
+
+# ----------------------------------------------------------------------------
+# zzsheldon
+# Exibe aleatoriamente uma frase do Sheldon, do seriado The Big Bang Theory.
+# Com a opção -t ou --traduzir mostra os diálogos traduzidos.
+#
+# Uso: zzsheldon [-t|--traduzir]
+# Ex.: zzsheldon
+#
+# Autor: Jonas Gentina, <jgentina (a) gmail com>
+# Desde: 2015-09-25
+# Versão: 2
+# Licença: GPL
+# Requisitos: zzaleatorio zztrim zzjuntalinhas zzlinha zztradutor zzsqueeze zzxml zzutf8
+# ----------------------------------------------------------------------------
+zzsheldon ()
+{
+	zzzz -h sheldon "$1" && return
+
+	# Declaracoes locais:
+	local url="http://the-big-bang-theory.com/quotes/character/Sheldon/"
+	local begin="Quote from the episode"
+	local end="Correct this quote"
+
+	zztool source ${url}$(zzaleatorio 211) |
+	zzutf8 |
+	sed 's/Correct this quote/<p>Correct this quote<\/p>/g' |
+	zzxml --tag p |
+	zzjuntalinhas -i '<p' -f '<.p>' -d ' ' |
+	sed 's/<br \/>/|/g' |
+	zzxml --untag |
+	zzsqueeze |
+	sed -n "/$begin/,/$end/p" |
+	zztrim -H |
+	zzjuntalinhas -i "$begin" -f "$end" -d "|" |
+	zzlinha |
+	tr '|' '\n' |
+	sed "/$end/d;s/$begin/Episode -/;/^[[:blank:]]*$/d" |
+	case $1 in
+		-t | --traduzir ) zztradutor en-pt ;;
+		*) cat - ;;
+		esac |
+	zztrim -H |
+	sed "2,$ { /:/!s/^/	/; s/: /:	/; }" |
+	expand -t 10
 }
 
 # ----------------------------------------------------------------------------
@@ -16121,10 +16846,10 @@ zzsigla ()
 	#  antes da sigla, e vários ou um espaço depois dependendo do
 	#  tamanho da sigla. Assim, o grep utiliza aspas duplas para entender
 	#  a filtragem
-	$ZZWWWDUMP "$url?acronym=$sigla" |
+	zztool dump "$url?acronym=$sigla" |
 		grep -i "   $sigla " |
 		zztrim -l |
-		sed 's/  */   /'
+		sed 's/  */   /; s/ *$//'
 }
 
 # ----------------------------------------------------------------------------
@@ -16225,6 +16950,71 @@ zzsplit ()
 			ordem++
 		}
 	' "$1"
+}
+
+# ----------------------------------------------------------------------------
+# zzsqueeze
+# Reduz vários espaços consecutivos vertical ou horizontalmente em apenas um.
+#
+# Opções:
+#  -l ou --linha: Apenas linhas vazias consecutivas, se reduzem a uma.
+#  -c ou --coluna: Espaços consecutivos em cada linha, são unidos em um.
+#
+# Obs.: Linhas inteiras com espaços ou tabulações,
+#        tornam-se linhas de comprimento zero (sem nenhum caractere).
+#
+# Uso: zzsqueeze [-l|--linha] [-c|--coluna] arquivo
+# Ex.: zzsqueeze arquivo.txt
+#      zzsqueeze -l arq.txt   # Apenas retira linhas consecutivas em branco.
+#      zzsqueeze -c arq.txt   # Transforma em 1 espaço, vários espaços juntos.
+#      cat arquivo | zzsqueeze
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2015-09-24
+# Versão: 1
+# Licença: GPL
+# ----------------------------------------------------------------------------
+zzsqueeze ()
+{
+	zzzz -h squeeze "$1" && return
+
+	local linha=1
+	local coluna=1
+
+	# Opções de linha de comando
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+			-l | --linha  ) shift; coluna=0;;
+			-c | --coluna ) shift; linha=0;;
+			--) shift; break;;
+			-*) zztool -e uso squeeze; return 1;;
+			*) break;;
+		esac
+	done
+
+	zztool file_stdin "$@" |
+	if test $coluna -eq 1
+	then
+		tr -s '[:blank:]' ' '
+	else
+		cat -
+	fi |
+	if test $linha -eq 1
+	then
+		awk '
+			/^[ 	]*$/{ branco++ }
+
+			! /^[ 	]*$/ {
+				if (branco>0) { print ""; branco=0 }
+				print
+			}
+
+			END { if (branco>0) print "" }
+		'
+	else
+		sed 's/^[ 	]*$//'
+	fi
 }
 
 # ----------------------------------------------------------------------------
@@ -16462,7 +17252,7 @@ zzsubway ()
 		# número qualquer dentre as opções disponíveis.
 		if test "$quantidade" = '*'
 		then
-			quantidade=$(echo "$opcoes" | sed -n '$=')
+			quantidade=$(echo "$opcoes" | zztool num_linhas)
 			quantidade=$(zzaleatorio 1 $quantidade)
 		fi
 
@@ -16499,7 +17289,7 @@ zzsubway ()
 # Desde: 2011-08-23
 # Versão: 6
 # Licença: GPLv2
-# Requisitos: zzseq
+# Requisitos: zzseq zztestar
 # ----------------------------------------------------------------------------
 zztabuada ()
 {
@@ -16511,7 +17301,7 @@ zztabuada ()
 
 	case "$#" in
 		1 | 2)
-			if zztool testa_numero_sinal "$1"
+			if zztestar numero_sinal "$1"
 			then
 				if zztool testa_numero "$2" && test $2 -le 99
 				then
@@ -16605,104 +17395,700 @@ zztac ()
 
 # ----------------------------------------------------------------------------
 # zztempo
-# http://weather.noaa.gov/
+# Mostra previsão do tempo obtida em http://wttr.in/ por meio do comando curl.
 # Mostra as condições do tempo (clima) em um determinado local.
-# Se nenhum parâmetro for passado, são listados os países disponíveis.
-# Se só o país for especificado, são listadas as suas localidades.
-# As siglas também podem ser usadas, por exemplo SBPA = Porto Alegre.
-# Uso: zztempo <país> <localidade>
-# Ex.: zztempo 'United Kingdom' 'London City Airport'
-#      zztempo brazil 'Curitiba Aeroporto'
-#      zztempo brazil SBPA
+# Se nenhum parâmetro for passado, é apresentada a previsão de Brasília.
+# As siglas de aeroporto também podem ser utilizadas.
+#
+# Opções:
+#
+# -l, --lang, --lingua
+#    Exibe a previsão em uma das línguas disponíveis: az be bg bs ca cy cs
+#    da de el eo es et fi fr hi hr hu hy is it  ja jv ka kk ko ky lt lv mk
+#    ml nl nn pt pl ro ru sk sl sr sr-lat sv sw th tr uk uz vi zh zu
+#
+# -u, --us
+#    Retorna leitura em unidades USCS - United States customary units -
+#    Unidades Usuais nos Estados Unidos. Isto é: "°F" para temperatura,
+#    "mph" para velocidade do vento,  "mi" para visibilidade e "in" para
+#    precipitação.
+#
+# -v, --vento
+#    Retorna vento em m/s ao invés de km/h ou mph.
+#
+# -m, --monocromatico
+#    Nao utiliza comandos de cores no terminal
+#
+# -s, --simples
+#    Retorna versão curta, com previsão de meio-dia e noite apenas.
+#    Utiliza 63 caracteres de largura contra os 125 da resposta completa.
+#
+# -c, --completo
+#    Retorna versão completa, com 4 horários ao longo do dia.
+#    Utiliza 125 caracteres de largura.
+#
+# -d, --dias
+# Determina o número de dias (entre 0 e 3) de previsão apresentados.
+#    -d 0 = apenas tempo atual. Também pode se chamado com -0
+#    -d 1 = tempo atual mais 1 dia. Também pode se chamado com -1
+#    -d 2 = tempo atual mais 2 dias. Também pode se chamado com -2
+#    -d 3 = tempo atual mais 3 dias. Padrão.
+#
+# Uso: zztempo [parametros] <localidade>
+# Ex.: zztempo 'São Paulo'
+#      zztempo cwb
+#      zztempo -d 0 Curitiba
+#      zztempo -2 -l fr -s Miami
 #
 # Autor: Thobias Salazar Trevisan, www.thobias.org
 # Desde: 2004-02-19
-# Versão: 1
+# Versão: 2
 # Licença: GPL
 # ----------------------------------------------------------------------------
 zztempo ()
 {
 	zzzz -h tempo "$1" && return
 
-	local codigo_pais codigo_localidade localidades
-	local pais="$1"
-	local localidade="$2"
-	local cache_paises=$(zztool cache tempo)
-	local cache_localidades=$(zztool cache tempo)
-	local url='http://weather.noaa.gov'
+	# Embrulhamos os principais parametros disponiveis em wttr.in/:help
+	# Em novos comandos "aportuguesados".
 
-	# Se o cache de países está vazio, baixa listagem da Internet
-	if ! test -s "$cache_paises"
+	# Inicializa os modificadores com seus valores padrão.
+	local lingua="pt"     # Lingua PT
+	local unidade="m"     # Unidades SI
+	local vento=""        # Vento Km/h
+	local dias="3"        # Máximo número de dias de previsão
+	local semcores=""     # Usa terminal colorido
+	local simplificado    # Previsao completa ou simplificada
+
+	#Altera para simplificado se largura do shell não comportar
+	if [ 125 -gt $(tput cols) ]
 	then
-		$ZZWWWHTML "$url" | sed -n '
-			/="country"/,/\/select/ {
-				s/.*="\([a-zA-Z]*\)">\(.*\) <.*/\1 \2/p
-			}' > "$cache_paises"
+		simplificado="n"   # Previsao simplificada
+	else
+		simplificado=""    # Previsao completa
 	fi
 
-	# Se nenhum parâmetro for passado, são listados os países disponíveis
-	if ! test -n "$pais"
+	#leitura dos parametros de entrada
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+		-l | --lang | --lingua)
+			lingua="$2";
+			shift;shift ;;
+		-u | --us)
+			unidade="u";
+			shift ;;
+		-v | --vento)
+			vento="M";
+			shift ;;
+		-s | --simples)
+			simplificado="n";
+			shift ;;
+		-c | --completo)
+			simplificado="";
+			shift ;;
+		-m | --monocromatico)
+			semcores="T";
+			shift;;
+		-d | --dias)
+			if zztool testa_numero "$2"
+			then
+				dias="$2";
+			else
+				zztool erro "Número de dias inválido: $2";
+				return 1;
+			fi
+			shift; shift;;
+		-0)
+			dias="0";
+			shift ;;
+		-1)
+			dias="1";
+			shift;;
+		-2)
+			dias="2";
+			shift;;
+		--) shift; break ;;
+		-*) zztool erro "Opção inválida: $1"; return 1 ;;
+		*) break;;
+		esac
+	done
+
+
+	# Comando bash proposto pelo site em: "wttr.in/:bash.function"
+	# Chama Previsão de Brasília se outro parâmetro não for passado
+
+	local opcoes="${unidade}${vento}${simplificado}${dias}${semcores}"
+	curl -s -H "Accept-Language: ${lingua}" ${lingua}.wttr.in/"${1:-Brazil}?${opcoes}" |
+	sed '/^Follow /d; /^New feature:/d'
+}
+
+# ----------------------------------------------------------------------------
+# zztestar
+# Testa a validade do número no tipo de categoria selecionada.
+# Nada é ecoado na saída padrão, apenas deve-se analisar o código de retorno.
+# Pode-se ecoar a saída de erro usando a opção -e antes da categoria.
+#
+#  Categorias:
+#   ano                      =>  Ano válido
+#   ano_bissexto | bissexto  =>  Ano Bissexto
+#   exp | exponencial        =>  Número em notação científica
+#   numero | numero_natural  =>  Número Natural ( inteiro positivo )
+#   numero_sinal | inteiro   =>  Número Inteiro ( positivo ou negativo )
+#   numero_fracionario       =>  Número Fracionário ( casas decimais )
+#   numero_real              =>  Número Real ( casas decimais possíveis )
+#   complexo                 =>  Número Complexo ( a+bi )
+#   dinheiro                 =>  Formato Monetário ( 2 casas decimais )
+#   bin | binario            =>  Número Binário ( apenas 0 e 1 )
+#   octal | octadecimal      =>  Número Octal ( de 0 a 7 )
+#   hexa | hexadecimal       =>  Número Hexadecimal ( de 0 a 9 e A até F )
+#   ip                       =>  Endereço de rede IPV4
+#   ip6 | ipv6               =>  Endereço de rede IPV6
+#   mac                      =>  Código MAC Address válido
+#   data                     =>  Data com formatação válida ( dd/mm/aaa )
+#   hora                     =>  Hora com formatação válida ( hh:mm )
+#
+#   Obs.: ano, ano_bissextto e os
+#         números naturais, inteiros e reais sem separador de milhar.
+#
+# Uso: zztestar [-e] categoria número
+# Ex.: zztestar ano 1999
+#      zztestar ip 192.168.1.1
+#      zztestar hexa 4ca9
+#      zztestar numero_real -45,678
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2016-03-14
+# Versão: 2
+# Licença: GPL
+# ----------------------------------------------------------------------------
+zztestar ()
+{
+	zzzz -h testar "$1" && return
+
+	local erro
+
+	# Devo mostrar a mensagem de erro?
+	test "$1" = '-e' && erro=1 && shift
+
+	# Verificação dos parâmetros
+	test -n "$1" || { zztool -e uso testar; return 1; }
+
+	case "$1" in
+		ano) zztool ${erro:+-e} testa_ano "$2" ;;
+
+		ano_bissexto | bissexto)
+			# Testa se $2 é um ano bissexto
+			#
+			# A year is a leap year if it is evenly divisible by 4
+			# ...but not if it's evenly divisible by 100
+			# ...unless it's also evenly divisible by 400
+			# http://timeanddate.com
+			# http://www.delorie.com/gnu/docs/gcal/gcal_34.html
+			# http://en.wikipedia.org/wiki/Leap_year
+			#
+			local y=$2
+			test $((y%4)) -eq 0 && test $((y%100)) -ne 0 || test $((y%400)) -eq 0
+			test $? -eq 0 && return 0
+
+			test -n "$erro" && zztool erro "Ano bissexto inválido '$2'"
+			return 1
+		;;
+
+		exp | exponencial)
+			# Testa se $2 é um número em notação científica
+			echo "$2" | sed 's/^-\([.,]\)/-0\1/;s/^\([.,]\)/0\1/' |
+			grep '^[+-]\{0,1\}[0-9]\{1,\}\([,.][0-9]\{1,\}\)\{0,1\}[eE][+-]\{0,1\}[0-9]\{1,\}$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Número exponencial inválido '$2'"
+			return 1
+		;;
+
+		numero | numero_natural) zztool ${erro:+-e} testa_numero "$2" ;;
+
+		numero_sinal | inteiro)
+			# Testa se $2 é um número (pode ter sinal: -2 +2)
+			echo "$2" | grep '^[+-]\{0,1\}[0-9]\{1,\}$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Número inteiro inválido '$2'"
+			return 1
+		;;
+
+		numero_fracionario)
+			# Testa se $2 é um número fracionário (1.234 ou 1,234)
+			# regex: \d+[,.]\d+
+			echo "$2" | grep '^[0-9]\{1,\}[,.][0-9]\{1,\}$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Número fracionário inválido '$2'"
+			return 1
+		;;
+
+		numero_real)
+			# Testa se $2 é um número real (1.234; 1,234; -56.789; 123)
+			# regex: [+-]?\d+([,.]\d+)?
+			echo "$2" | sed 's/^-\([.,]\)/-0\1/;s/^\([.,]\)/0\1/' |
+			grep '^[+-]\{0,1\}[0-9]\{1,\}\([,.][0-9]\{1,\}\)\{0,1\}$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Número real inválido '$2'"
+			return 1
+		;;
+
+		complexo)
+			# Testa se $2 é um número complexo (3+5i ou -9i)
+			# regex: ((\d+([,.]\d+)?)?[+-])?\d+([,.]\d+)?i
+			echo "$2" | sed 's/^-\([.,]\)/-0\1/;s/^\([.,]\)/0\1/' |
+			grep '^\(\([+-]\{0,1\}[0-9]\{1,\}\([,.][0-9]\{1,\}\)\{0,1\}\)\{0,1\}[+-]\)\{0,1\}[0-9]\{1,\}\([,.][0-9]\{1,\}\)\{0,1\}i$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Número complexo inválido '$2'"
+			return 1
+		;;
+
+		dinheiro)
+			# Testa se $2 é um valor monetário (1.234,56 ou 1234,56)
+			# regex: (  \d{1,3}(\.\d\d\d)+  |  \d+  ),\d\d
+			echo "$2" | grep '^[+-]\{0,1\}\([0-9]\{1,3\}\(\.[0-9][0-9][0-9]\)\{1,\}\|[0-9]\{1,\}\),[0-9][0-9]$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Valor inválido '$2'"
+			return 1
+		;;
+
+		bin | binario)
+			# Testa se $2 é um número binário
+			echo "$2" | grep '^[01]\{1,\}$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Número binário inválido '$2'"
+			return 1
+		;;
+
+		octal | octadecimal)
+			# Testa se $2 é um número octal
+			echo "$2" | grep '^[0-7]\{1,\}$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Número octal inválido '$2'"
+			return 1
+		;;
+
+		hexa | hexadecimal)
+			# Testa se $2 é um número hexadecimal
+			echo "$2" | grep '^[0-9A-Fa-f]\{1,\}$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Número hexadecimal inválido '$2'"
+			return 1
+		;;
+
+		ip)
+			# Testa se $2 é um número IPV4 (nnn.nnn.nnn.nnn)
+			local nnn="\([0-9]\{1,2\}\|1[0-9][0-9]\|2[0-4][0-9]\|25[0-5]\)" # 0-255
+			echo "$2" | grep "^$nnn\.$nnn\.$nnn\.$nnn$" >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Número IP inválido '$2'"
+			return 1
+		;;
+
+		ip6 | ipv6)
+			# Testa se $2 é um número IPV6 (hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh)
+			echo "$2" |
+			awk -F : '
+			{
+				if ( $0 ~ /^:[^:]/ )      { exit 1 }
+				if ( $0 ~ /:::/  )        { exit 1 }
+				if ( $0 ~ /:$/ )          { exit 1 }
+				if ( NF<8 && $0 !~ /::/ ) { exit 1 }
+				if ( NF>8 )               { exit 1 }
+				if ( NF<=8 ) {
+					for (i=1; i<=NF; i++) {
+						if (length($i)>4)  { exit 1 }
+						if (length($i)>0 && $i !~ /^[0-9A-Fa-f]+$/) { exit 1 }
+					}
+				}
+			}' && return 0
+
+			test -n "$erro" && zztool erro "Número IPV6 inválido '$2'"
+			return 1
+		;;
+
+		mac)
+			# Testa se $2 tem um formato de MAC válido
+			# O MAC poderá ser nos formatos 00:00:00:00:00:00, 00-00-00-00-00-00 ou 0000.0000.0000
+			echo "$2" | egrep '^([0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}$' >/dev/null && return 0
+			echo "$2" | egrep '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$' >/dev/null && return 0
+			echo "$2" | egrep '^([0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}$' >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "MAC address inválido '$2'"
+			return 1
+		;;
+
+		data) zztool ${erro:+-e} testa_data "$2" ;;
+
+		hora)
+			# Testa se $2 é uma hora (hh:mm)
+			echo "$2" | grep "^\(0\{0,1\}[0-9]\|1[0-9]\|2[0-3]\):[0-5][0-9]$" >/dev/null && return 0
+
+			test -n "$erro" && zztool erro "Hora inválida '$2'"
+			return 1
+		;;
+
+		*)
+			# Qualquer outra opção retorna erro
+			test -n "$erro" && zztool erro "Opção '$1' inválida"
+			return 1
+		;;
+	esac
+}
+
+# ----------------------------------------------------------------------------
+# zztimer
+# Mostra um cronômetro regressivo.
+# Opções:
+#   -n: Os números são ampliados para um formato de 5 linhas e 6 colunas.
+#   -x char: Igual a -n, mas os números são compostos pelo caracter "char".
+#   -y nums chars: Troca os nums por chars, igual ao comando 'y' no sed.
+#      Obs.: nums e chars tem que ter a mesma quantidade de caracteres.
+#   -c: Apenas converte o tempo em segundos.
+#   -s: Aguarda o tempo como sleep, sem mostrar o cronômetro.
+#   -p: Usa uma temporização mais precisa, porém usa mais recursos.
+#   --teste: Desabilita centralização (usar depois das opções -n,-x,-y).
+#
+# Obs: Máximo de 99 horas.
+#      Opções -n, -x, -y sempre centralizada na tela, exceto se usar --teste.
+#
+# Uso: zztimer [-c|-s|-n|-x char|-y nums chars] [-p] [[hh:]mm:]ss
+# Ex.: zztimer 90           # Cronomêtro regressivo a partir de 1:30
+#      zztimer 2:56         # Cronometragem regressiva simples.
+#      zztimer -c 2:22      # Exibe o tempo em segundos (no caso 142)
+#      zztimer -s 5:34      # Exibe o tempo em segundos e aguarda o tempo.
+#      zztimer --centro 20  # Centralizado horizontal e verticalmente
+#      zztimer -n 1:7:23    # Formato ampliado do número
+#      zztimer -x H 65      # Com números feito pela letra 'H'
+#      zztimer -y 0123456789 9876543210 60  # Troca os números
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2016-01-25
+# Versão: 5
+# Licença: GPL
+# Requisitos: zzcut
+# ----------------------------------------------------------------------------
+zztimer ()
+{
+
+	zzzz -h timer "$1" && return
+
+	local opt str num seg char_para centro left_pad
+	local teste=0
+	local no_tput=1
+	local prec='s'
+
+	# Verificação dos parâmetros
+	test -n "$1" || { zztool -e uso timer; return 1; }
+
+	# Opções de exibição dos números
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+		-n) opt='n'; shift ;;
+		-x)
+			opt='x'
+			str=$(echo "$2" | zzcut -c 1)
+			shift; shift
+		;;
+		-y)
+			opt='x'
+			str="$2"
+			char_para="$3";
+			if test ${#str} -ne ${#char_para}
+			then
+				opt='n'
+				unset str
+				unset char_para
+			fi
+			shift; shift; shift
+		;;
+		-c) opt='c'; no_tput=1; shift ;;
+		-s) opt='s'; no_tput=1; shift ;;
+		-p) prec='p'; shift ;;
+		--teste) teste=1; shift ;;
+		-*) zztool erro "Opção inválida: $1"; return 1 ;;
+		*) break;;
+		esac
+	done
+
+	echo "$1" | grep '^[0-9:]\{1,\}$' >/dev/null || { zztool erro "Entrada inválida"; return 1; }
+
+	if test $teste -eq 1
 	then
-		sed 's/^[^ ]*  *//' "$cache_paises"
-		return
+		no_tput=1
+		centro=0
+	else
+		case "$opt" in
+			n|x) no_tput=0; centro=1 ;;
+			*)   no_tput=1; centro=0 ;;
+		esac
 	fi
 
-	# Grava o código deste país (BR  Brazil -> BR)
-	codigo_pais=$(grep -i "$1" "$cache_paises" | sed 's/  .*//' | sed 1q)
-
-	# O país existe?
-	if ! test -n "$codigo_pais"
-	then
-		zztool erro "País \"$pais\" não encontrado"
-		return 1
-	fi
-
-	# Se o cache de locais está vazio, baixa listagem da Internet
-	cache_localidades=$cache_localidades.$codigo_pais
-	if ! test -s "$cache_localidades"
-	then
-		$ZZWWWHTML "$url/weather/${codigo_pais}_cc.html" | sed -n '
-			/="cccc"/,/\/select/ {
-				//d
-				s/.*="\([a-zA-Z]*\)">/\1 /p
-			}' > "$cache_localidades"
-	fi
-
-	# Se só o país for especificado, são listadas as localidades deste país
-	if ! test -n "$localidade"
-	then
-		cat "$cache_localidades"
-		return
-	fi
-
-	# Pesquisa nas localidades
-	localidades=$(grep -i "$localidade" "$cache_localidades")
-
-	# A localidade existe?
-	if ! test -n "$localidades"
-	then
-		zztool erro "Localidade \"$localidade\" não encontrada"
-		return 1
-	fi
-
-	# Se mais de uma localidade for encontrada, mostre-as
-	if test $(echo "$localidades" | sed -n '$=') != 1
-	then
-		echo "$localidades"
-		return 0
-	fi
-
-	# Grava o código do local (SBCO  Porto Alegre -> SBCO)
-	codigo_localidade=$(echo "$localidades" | sed 's/  .*//')
-
-	# Faz a consulta e filtra o resultado
-	echo
-	$ZZWWWDUMP "$url/weather/current/${codigo_localidade}.html" | sed -n '
-		/Current Weather/,/24 Hour/ {
-			//d
-			/____*/d
-			p
+	# Separando cada elemento de tempo hora, minutos e segundos
+	# E ajustando minutos e segundos que extrapolem o limite de 60{min,s}
+	set - $(
+		echo "$1" |
+		awk -F ':' '
+		{
+			seg  = $NF
+			min  = (NF>2?(length($2)?$2:0):(NF==2?(length($1)?$1:0):0))
+			hora = (NF>=3?(length($1)?$1:0):0)
+			print (hora*3600) + (min*60) + seg
 		}'
+	)
+
+	if test $1 -lt 360000
+	then
+		num=$1
+		test "$opt" = "c" && { echo $num;  return; }
+		test "$opt" = "s" && { sleep $num; return; }
+	else
+		zztool erro "Valor $1 muito elevado."
+		return 1
+	fi
+
+	# Restaurando terminal
+	test "$no_tput" -eq 0 && tput reset
+
+	# Centralizar?
+	if test "$centro" -eq 1
+	then
+		if test -n "$opt"
+		then
+			tput cup $(tput lines | awk '{print int(($1 - 5) / 2)}') 0
+			left_pad=$(tput cols | awk '{print int(($1 - 56) / 2)}')
+		else
+			tput cup $(tput lines | awk '{print int($1 / 2)}') $(tput cols | awk '{print int(($1 - 8) / 2)}')
+		fi
+	fi
+
+	while test $num -ge 0
+	do
+
+		# Definindo segundo atual
+		seg=$(date +%S)
+
+		# Marcando ponto para retorno do cursor
+		test "$no_tput" -eq 0 && tput sc
+
+		# Exibindo os números do cronômetro
+		echo "$num" |
+		awk -v formato="$opt" -v left_pad="$left_pad" '
+		function formatar(hora,  i, j, space) {
+			space=(length(left_pad)>0?sprintf("%"left_pad"s"," "):"")
+			numero[0, 1] = numero[0, 5] = " 0000 "; numero[0, 2] = numero[0, 3] = numero[0, 4] = "0    0"
+			numero[1, 1] = " 111  "; numero[1, 2] = numero[1, 3] = numero[1, 4] = "  11  "; numero[1, 5] = "111111"
+			numero[2, 1] = " 2222 "; numero[2, 2] = "    22"; numero[2, 3] = "   22 "; numero[2, 4] = " 22   "; numero[2, 5] = "222222"
+			numero[3, 1] = numero[3, 5] = "33333 "; numero[3, 2] =  numero[3, 4] = "     3"; numero[3, 3] = " 3333 "
+			numero[4, 1] = "   44 "; numero[4, 2] = "  4 4 "; numero[4, 3] = " 4  4 "; numero[4, 4] = "444444"; numero[4, 5] = "    4 "
+			numero[5, 1] = numero[5, 3] = "55555 "; numero[5, 2] = "5     "; numero[5, 4] = "     5"; numero[5, 5] = " 5555 "
+			numero[6, 1] = numero[6, 5] = " 6666 "; numero[6, 2] = "6     "; numero[6, 3] = "66666 "; numero[6, 4] = "6    6"
+			numero[7, 1] = "777777"; numero[7, 2] = "    7 "; numero[7, 3] = "   7  "; numero[7, 4] = "  7   "; numero[7, 5] = " 7    "
+			numero[8, 1] = numero[8, 3] = numero[8, 5] = " 8888 "; numero[8, 2] = numero[8, 4] = "8    8"
+			numero[9, 1] = numero[9, 5] = " 9999 "; numero[9, 2] = "9    9"; numero[9, 3] = " 99999"; numero[9, 4] = "     9"
+			numero["x", 1] = numero["x", 3] = numero["x", 5] = "      "; numero["x", 2] = numero["x", 4] = "  #   "
+			for (i=1; i<6; i++)
+				print space numero[substr(hora,1,1), i], numero[substr(hora,2,1), i], numero["x", i], numero[substr(hora,4,1), i], numero[substr(hora,5,1), i], numero["x", i], numero[substr(hora,7,1), i], numero[substr(hora,8,1), i]
+		}
+		{
+			hh = $1/3600
+			mm = ($1%3600)/60
+			ss = ($1%3600)%60
+			if (length(formato)) {
+				formatar(sprintf("%02d:%02d:%02d\n", hh, mm, ss))
+			}
+			else
+				printf "%02d:%02d:%02d\n", hh, mm, ss
+		}' |
+		if test -n "$str"
+		then
+			if test "${#char_para}" -gt 0
+			then
+				sed "y/$str/$char_para/"
+			else
+				sed "s/[0-9#]/$str/g"
+			fi
+		else
+			cat -
+		fi
+
+		# Temporizar ( p = mais preciso / s = usando sleep )
+		if test "$prec" = 'p'
+		then
+			# Mais preciso, mas sobrecarrega o processamento
+			while test "$seg" = $(date +%S);do :;done
+		else
+			# Menos preciso, porém mais leve ( padrão )
+			sleep 1
+		fi
+
+		# Decrementar o contador
+		num=$((num-1))
+
+		# Reposicionar o cursor
+		if test $num -ge 0
+		then
+			test "$no_tput" -eq 0 && tput rc
+		fi
+	done
+}
+
+# ----------------------------------------------------------------------------
+# zztop
+# Lista os 10 computadores mais rápidos do mundo.
+# Sem argumentos usa a listagem mais recente.
+# Definindo categoria, quantifica os 500 computadores mais rápidos.
+#
+# Argumentos de ajuda:
+#  -c: Exibe categorias possíveis
+#  -l: Exibe as listas disponíveis
+#
+# Argumentos de listagem:
+#  [categoria]: Seleciona a categoria desejada.
+#  [lista]:     Seleciona a lista, se omitida mostra mais recente.
+# Obs: Podem ser usadas em conjunto
+#
+# Uso: zztop [-c|-l] [categoria] [lista]
+# Ex.: zztop             # Lista os 10 mais rápidos.
+#      zztop osfam 23    # Famílias de OS em Junho de 2004 ( Virada Linux! )
+#      zztop country     # Quantifica por pais entre os 500 mais velozes
+#      zztop -c          # Lista as categorias possíveis da listagem
+#      zztop -l          # Exibe todas as listas disponíveis
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2015-07-19
+# Versão: 2
+# Licença: GPL
+# Requisitos: zztac zzcolunar zzecho zzxml zzunescape zztrim
+# ----------------------------------------------------------------------------
+zztop ()
+{
+
+	zzzz -h top "$1" && return
+
+	local url="http://top500.org"
+	local cor='amarelo'
+	local ntab=35
+	local cache category release all_releases max_release ano mes
+
+	# Argumento apenas para exibir opções diponíveis e sair
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+		-c)
+		# Categorias pela qual a lista se subdivide
+			zzecho -l $cor "vendor        Vendors"
+			zzecho -l $cor "app           Application Area"
+			zzecho -l $cor "accel         Accelerator/Co-Processor"
+			zzecho -l $cor "segment       Segments"
+			zzecho -l $cor "continent     Continents"
+			zzecho -l $cor "connfam       Interconnect Family"
+			zzecho -l $cor "interconnect  Interconnect"
+			zzecho -l $cor "country       Countries"
+			zzecho -l $cor "region        Geographical Region"
+			zzecho -l $cor "procgen       Processor Generation"
+			zzecho -l $cor "accelfam      Accelerator/CP Family"
+			zzecho -l $cor "architecture  Architecture"
+			zzecho -l $cor "osfam         Operating system Family"
+			zzecho -l $cor "cores         Cores per Socket"
+			zzecho -l $cor "os            Operating System"
+			return 0
+		;;
+		-l)
+		# Meses e anos disponíveis, representado por um número sequencial
+			zztool source "${url}/statistics/list" |
+			sed -n '/option value/{s/^.*value="//;s/<\/option>$//;s/".*>/	/;p;}' |
+			sed '/June 1993$/q' | expand -t 3 |
+			zztac | zzcolunar -w 20 3
+			return 0
+		;;
+		-*) zztool -e uso top; return 1 ;;
+		esac
+	done
+
+	all_releases=$(
+		zztool source "${url}/statistics/list" |
+		sed -n '/option value/{s/^.*value="//;s/<\/option>$//;s/".*>/	/;p;}' |
+		sed '/June 1993$/q'
+	)
+
+	while test -n "$1"
+	do
+		# Escolha da categoria
+		case "$1" in
+			vendor | app | accel | procgen | os)                  category="$1"; ntab=35; shift;;
+			connfam | interconnect | country | region | accelfam) category="$1"; ntab=28; shift;;
+			segment | continent | architecture | osfam | cores)   category="$1"; ntab=12; shift;;
+		esac
+		# Escolha da lista
+		if zztool testa_numero "$1"
+		then
+			release="$1"
+			shift
+		fi
+	done
+
+	# Definindo a lista em caso de omissão
+	max_release=$(echo "$all_releases" | head -n 1 | sed 's/	.*//')
+	if test -z "$release"
+	then
+		release=$max_release
+	elif test "$release" -gt "$max_release"
+	then
+		release=$max_release
+	fi
+
+	# Redefinindo url
+	if test -n "$category"
+	then
+		url="${url}/statistics/list/${release}/${category}"
+	else
+		ano=$(echo "$all_releases" | sed -n "/^${release}	/{s/.* //;p;}")
+		mes=$(
+			echo "$all_releases" |
+			awk -v awk_release="$release" 'BEGIN {
+				mes["January"]=1; mes["February"]=2; mes["March"]=3; mes["April"]=4;
+				mes["May"]=5; mes["June"]=6; mes["July"]=7; mes["August"]=8;
+				mes["September"]=9; mes["October"]=10; mes["November"]=11; mes["December"]=12;
+				}
+				{if ($1 == awk_release) printf "%02d\n", mes[$2]}'
+		)
+		url="${url}/lists/${ano}/${mes}/"
+	fi
+
+	# Cacheando
+	cache=$(zztool source "$url")
+
+	# Data da lista
+	if test -n "$ano"
+	then
+		echo "$mes/$ano"
+	else
+		echo "$cache" |
+		sed -n '/option value/{s/^.*value="//;s/<\/option>$//;s/".*>/ /;p;}' |
+		sed '/June 1993$/q' | sed -n "/^$release /{s/^[0-9]\{1,\} //;p;}"
+	fi
+
+	# Extraindo a lista escolhida
+	if test -n "$category"
+	then
+		echo "$cache" |
+		sed -n "/dataTable.addRows/{n;p;}" |
+		sed "s/^ *//;s/',/	/g" |
+		tr -d '\\' | tr -d "['," | tr ']' '\n' |
+		expand -t $ntab
+	else
+		echo "$cache" | sed '/<td style=/,/<\/td>/d' |
+		zzxml --tag td --notag thead --untag |
+		sed '/^[0-9]\{1,\},/d;/googletag/d' |
+		awk '$1 ~ /^[0-9]+$/{print ""};{printf $0"|"}'|
+		sed '1d;s/| -/ -/;s/|$//' |
+		awk -F'|' '{printf "%02d: ", $1; print $2, "(" $3 ")";print "    " $4, "(" $5 ")", $6; print ""}' |
+		zzunescape --html |
+		zztrim -r |
+		sed 's/ *)/)/g;s/  *(/ (/g'
+	fi
 }
 
 # ----------------------------------------------------------------------------
@@ -16733,9 +18119,9 @@ zztempo ()
 #
 # Autor: Marcell S. Martini <marcellmartini (a) gmail com>
 # Desde: 2008-09-02
-# Versão: 12
+# Versão: 13
 # Licença: GPLv2
-# Requisitos: zzxml zzplay zzunescape
+# Requisitos: zzxml zzplay zzunescape zzutf8
 # ----------------------------------------------------------------------------
 zztradutor ()
 {
@@ -16743,7 +18129,7 @@ zztradutor ()
 
 	# Variaveis locais
 	local padrao
-	local url='http://translate.google.com.br'
+	local url='https://translate.google.com.br'
 	local lang_de='pt'
 	local lang_para='en'
 	local charset_para='UTF-8'
@@ -16758,10 +18144,11 @@ zztradutor ()
 		;;
 		-l | --lista)
 			# Uma tag por linha, então extrai e formata as opções do <SELECT>
-			$ZZWWWHTML "$url" |
+			zztool source "$url" |
 			zzxml --tag option |
 			sed -n '/<option value=af>/,/<option value=yi>/p' |
-			zztool texto_em_iso | sort -u |
+			zzutf8 |
+			sort -u |
 			sed 's/.*value=\([^>]*\)>\([^<]*\)<.*/\1: \2/g;s/zh-CN/cn/g' |
 			grep ${2:-:}
 			return
@@ -16771,21 +18158,21 @@ zztradutor ()
 				shift
 				padrao=$(echo "$*" | sed "$ZZSEDURL")
 				local audio="translate_tts?ie=$charset_para&q=$padrao&tl=pt&prev=input"
-				$ZZWWWHTML "$url/$audio" > $audio_file && zzplay $audio_file mplayer
+				zztool source "$url/$audio" > $audio_file && zzplay $audio_file mplayer
 				rm -f $audio_file
 				return
 		;;
 	esac
 
-	padrao=$(zztool multi_stdin "$@" | awk '{ if (NR==1) { printf $0 } else { printf "%0a" $0 } }' | sed "$ZZSEDURL")
+	padrao=$(zztool multi_stdin "$@" | awk '{ if (NR==1) { printf $0 } else { printf "%%0a" $0 } }' | sed "$ZZSEDURL")
 
 	# Exceção para o chinês, que usa um código diferente
 	test $lang_para = 'cn' && lang_para='zh-CN'
 
 	# Baixa a URL, coloca cada tag em uma linha, pega a linha desejada
 	# e limpa essa linha para estar somente o texto desejado.
-	$ZZWWWHTML "$url?tr=$lang_de&hl=$lang_para&text=$padrao" |
-		zztool texto_em_iso |
+	zztool source -u "Mozilla/5.0" "$url?tr=$lang_de&hl=$lang_para&text=$padrao" 2>/dev/null |
+		zzutf8 |
 		zzxml --tidy |
 		sed -n '/id=result_box/,/<\/div>/p' |
 		zzxml --untag |
@@ -16797,8 +18184,8 @@ zztradutor ()
 # zztranspor
 # Trocar linhas e colunas de um arquivo, fazendo uma simples transposição.
 # Opções:
-#   -d, --fs separador   define o separador de campos na entrada.
-#   --ofs separador      define o separador de campos na saída.
+#   -d <sep>                        define o separador de campos na entrada.
+#   -D, --output-delimiter <sep>  define o separador de campos na saída.
 #
 # O separador na entrada pode ser 1 ou mais caracteres ou uma ER.
 # Se não for declarado assume-se espaços em branco como separador.
@@ -16810,9 +18197,9 @@ zztradutor ()
 #
 # Se o separador da entrada é uma ER, é bom declarar o separador de saída.
 #
-# Uso: zztranspor [-d | --fs <separador>] [--ofs <separador>] <arquivo>
-# Ex.: zztranspor -d ":" --ofs "-" num.txt
-#      sed -n '2,5p' num.txt | zztranspor --fs '[\t:]' --ofs '\t'
+# Uso: zztranspor [-d <sep>] [-D | --output-delimiter <sep>] <arquivo>
+# Ex.: zztranspor -d ":" --output-delimiter "-" num.txt
+#      sed -n '2,5p' num.txt | zztranspor -d '[\t:]' -D '\t'
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-09-03
@@ -16829,13 +18216,13 @@ zztranspor ()
 	while test "${1#-}" != "$1"
 	do
 		case "$1" in
-			-d | --fs)
+			-d)
 			# Separador de campos no arquivo de entrada
 				sep="$2"
 				shift
 				shift
 			;;
-			--ofs)
+			-D | --output-delimiter)
 			# Separador de campos na saída
 				ofs="$2"
 				shift
@@ -16984,8 +18371,8 @@ zztrocaarquivos ()
 	test $# -eq 2 || { zztool -e uso trocaarquivos; return 1; }
 
 	# Verifica se os arquivos existem
-	zztool arquivo_legivel "$1" || return
-	zztool arquivo_legivel "$2" || return
+	zztool -e arquivo_legivel "$1" || return
+	zztool -e arquivo_legivel "$2" || return
 
 	# Tiro no pé? Não, obrigado
 	test "$1" = "$2" && return
@@ -17040,7 +18427,7 @@ zztrocaextensao ()
 	for arquivo
 	do
 		# O arquivo existe?
-		zztool arquivo_legivel "$arquivo" || continue
+		zztool -e arquivo_legivel "$arquivo" || continue
 
 		base="${arquivo%$ext1}"
 		novo="$base$ext2"
@@ -17055,7 +18442,7 @@ zztrocaextensao ()
 		if test ! -n "$nao"
 		then
 			# Não sobrescreve arquivos já existentes
-			zztool arquivo_vago "$novo" || return
+			zztool -e arquivo_vago "$novo" || return
 
 			# Vamos lá
 			mv -- "$arquivo" "$novo"
@@ -17099,7 +18486,7 @@ zztrocapalavra ()
 	for arquivo
 	do
 		# O arquivo existe?
-		zztool arquivo_legivel "$arquivo" || continue
+		zztool -e arquivo_legivel "$arquivo" || continue
 
 		# Um teste rápido para saber se o arquivo tem a palavra antiga,
 		# evitando gravar o temporário desnecessariamente
@@ -17129,7 +18516,8 @@ zztrocapalavra ()
 #  canais - lista os canais com seus códigos para consulta.
 #
 #  <código canal> - Programação do canal escolhido.
-#  Obs.: Se for seguido de "semana" ou "s" mostra toda programação semanal.
+#  Obs.: Seguido de "semana" ou "s": toda programação das próximas semanas.
+#        Se for seguido de uma data, mostra a programação da data informada.
 #
 #  cod <número> - mostra um resumo do programa.
 #   Obs: número obtido pelas listagens da programação do canal consultado.
@@ -17138,15 +18526,16 @@ zztrocapalavra ()
 #  doc ou documentario, esportes ou futebol, filmes, infantil, variedades
 #  series ou seriados, aberta, todos ou agora (padrão).
 #
-# Uso: zztv <código canal> [semana|s]  ou  zztv cod <número>
+# Uso: zztv [<código canal> [s | <DATA>]]  ou  zztv [cod <número> | canais]
 # Ex.: zztv CUL          # Programação da TV Cultura
-#      zztv cod 3235238
+#      zztv fox 31/5     # Programação da Fox na data, se disponível
+#      zztv cod 3235238  # Detalhes do programa identificado pelo código
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2002-02-19
-# Versão: 11
+# Versão: 13
 # Licença: GPL
-# Requisitos: zzunescape zzdos2unix zzcolunar
+# Requisitos: zzcolunar zzdatafmt zzjuntalinhas zzsqueeze zztrim zzunescape zzxml
 # ----------------------------------------------------------------------------
 zztv ()
 {
@@ -17155,23 +18544,29 @@ zztv ()
 	local DATA=$(date +%d\\/%m)
 	local URL="http://meuguia.tv/programacao"
 	local cache=$(zztool cache tv)
-	local codigo desc linhas largura
+	local codigo desc linhas
 
 	# 0 = lista canal especifico
 	# 1 = lista programas de vários canais no horário
+	# 2 = Detalhes do programa através do código
 	local flag=0
 
 	if ! test -s "$cache"
 	then
-		$ZZWWWHTML ${URL}/categoria/Todos |
-		sed -n '/programacao\/canal/p;/^ *|/p' |
-		awk -F '("| [|] )' '{print $2, $6 }' |
-		sed 's/<[^>]*>//g;s|^.*/||' |
-		zzdos2unix |
-		sort >> $cache
+		zztool source "${URL}/categoria/Todos/" |
+		sed -n '
+			/<a title="/{s/.*href="//;s/".*//;s|.*/||;p;}
+			/<h2>/{s/^[^>]*>//;s/<.*//;s/\(TCM - \| \(EP\)\?TV\| Channel\)//;s/Esporte Interativo /EI /;p;}
+		' |
+		awk '{printf $0 " "; getline; print}' |
+		sort |
+		zzunescape --html > "$cache"
 	fi
-	linhas=$(echo "scale=0; ($(zztool num_linhas $cache) + 1)/ 4 " | bc)
-	largura=$(awk '{print length}' $cache | sort -n | sed -n '$p')
+
+	if test -n "$2"
+	then
+		DATA=$(zzdatafmt -f 'DD\/MM' "$2" 2>/dev/null || echo "$DATA")
+	fi
 
 	if test -n "$1" && grep -i "^$1" $cache >/dev/null 2>/dev/null
 	then
@@ -17179,22 +18574,30 @@ zztv ()
 		desc=$(grep -i "^$1" $cache | sed "s/^[A-Z0-9]\{3\} *//")
 
 		zztool eco $desc
-		$ZZWWWHTML "${URL}/canal/$codigo" |
-		sed -n '/<li class/{N;p;}' |
-		sed '/^[[:space:]]*$/d;/.*<\/*li/s/<[^>]*>//g' |
-		sed 's/^.*programa\///g;s/".*title="/_/g;s/">//g;s/<span .*//g;s/<[^>]*>/ /g;s/amp;//g' |
-		sed 's/^[[:space:]]*/ /g' |
-		sed '/^[[:space:]]*$/d' |
-		if test "$2" = "semana" -o "$2" = "s"
+		zztool source "${URL}/canal/$codigo" |
+		zztrim |
+		sed -n '
+			s/> *$/&|/
+			/subheader/{/<!--/d;s/<.\?li[^>]*>|\?//g;p;}
+			/<a title=/{s|.*/||;s/-.*/|/;p}
+			/lileft/p
+			/<h2>/p
+		' |
+		zzxml --untag |
+		if test "$2" != "semana" -a "$2" != "s"
 		then
-			sed "/^ \([STQD].*[0-9][0-9]\/[0-9][0-9]\)/ { x; p ; x; s//\1/; }" |
-			sed 's/^ \(.*\)_\(.*\)\([0-9][0-9]h[0-9][0-9]\)/ \3 \2 Cod: \1/g'
+			sed -n "/, ${DATA}$/,/[^|]$/p"
 		else
-			sed -n "/, $DATA/,/^ [STQD].*[0-9][0-9]\/[0-9][0-9]/p" |
-			sed '$d;1s/^ *//;2,$s/^ \(.*\)_\(.*\)\([0-9][0-9]h[0-9][0-9]\)/ \3 \2 Cod: \1/g'
+			cat -
 		fi |
+		awk '
+			/[0-9]$/{print "";print}
+			/\|/{ printf $0;for (i=1;i<3;i++){getline; printf $0};print "" }' |
+		sed '${/[^|]$/d}' |
+		zztrim |
 		zzunescape --html |
-		awk -F " Cod: " '{ if (NF==2) { printf "%-64s Cod: %s\n", substr($1,1,63), substr($2, 1, index($2, "-")-1) } else print }'
+		awk -F '|' 'NF<=1;NF>1{printf "%-5s %-50s cod: %s\n", $2, $3,$1}'
+
 		return
 	fi
 
@@ -17215,21 +18618,32 @@ zztv ()
 	if test $flag -eq 1
 	then
 		zztool eco $desc
-		$ZZWWWHTML "$URL" | sed -n '/<li style/{N;p;}' |
-		sed '/^[[:space:]]*$/d;/.*<\/*li/s/<[^>]*>//g' |
-		sed 's/.*title="//g;s/">.*<br \/>/ | /g;s/<[^>]*>/ /g' |
-		sed 's/[[:space:]]\{1,\}/ /g' |
-		sed '/^[[:space:]]*$/d' |
+		zztool source "$URL" |
+		sed -n '
+			/<a title="/{s/.*title="//;s|".*/|\t|;s/".*//;p;}
+			/<h2>/{s/^[^>]*>//;s/<.*//;s/\(TCM - \| \(EP\)\?TV\| Channel\)//;s/Esporte Interativo /EI /;p;}
+			/progressbar/{s/.*\([0-2][0-9]:[0-5][0-9]\).*/\1/p}
+		' |
+		awk -F '[\t]' '{printf "%s|%s|", $1, $2;getline;printf $0 "|";getline; print}' |
 		zzunescape --html |
-		awk -F "|" '{ printf "%5s%-57s%s\n", $2, substr($1,1,56), $3 }'
+		awk -F '|' '{printf "%5s %-45s %s - %s\n",$4,$1, $2, $3}'
 	elif test "$1" = "cod"
 	then
 		zztool eco "Código: $2"
-		$ZZWWWHTML "$URL" | sed -n '/<span class="tit">/,/Compartilhe:/p' |
-		sed 's/<span class="tit">/Título: /;s/<span class="tit_orig">/Título Original: /' |
-		sed 's/<[^>]*>/ /g;s/amp;//g;s/\&ccedil;/ç/g;s/\&atilde;/ã/g;s/.*str="//;s/";//;s/[\|] //g' |
-		sed 's/^[[:space:]]*/ /g' |
-		sed '/^[[:space:]]*$/d;/document.write/d;/str == ""/d;$d' |
+		zztool source "$URL" |
+		sed -n '/<h1 class/p;/body2/,/div>/p;/var str/p' |
+		zzjuntalinhas -i '<p' -f 'p>' -d ' ' |
+		zzjuntalinhas -i '<script' -f 'script>' -d ' ' |
+		sed '
+			/var str/{s/.*="//;s/".*//;}
+			/<!--/d
+			s_</a>_ | _g
+			s/<br *\/>/\
+/' |
+		zzxml --untag |
+		sed 's/ | $//' |
+		zztrim |
+		zzsqueeze |
 		zzunescape --html
 	fi
 }
@@ -17238,17 +18652,16 @@ zztv ()
 # zztweets
 # Busca as mensagens mais recentes de um usuário do Twitter.
 # Use a opção -n para informar o número de mensagens (padrão é 5, máx 20).
-# Com a opção -r após o nome do usuário, lista também tweets respostas.
 #
-# Uso: zztweets [-n N] username [-r]
+# Uso: zztweets [-n N] username
 # Ex.: zztweets oreio
 #      zztweets -n 10 oreio
-#      zztweets oreio -r
 #
 # Autor: Eri Ramos Bastos <bastos.eri (a) gmail.com>
 # Desde: 2009-07-30
-# Versão: 8
+# Versão: 10
 # Licença: GPL
+# Requisitos: zzsqueeze zztrim
 # ----------------------------------------------------------------------------
 zztweets ()
 {
@@ -17273,39 +18686,44 @@ zztweets ()
 	# Informar o @ é opcional
 	name=$(echo "$1" | tr -d @)
 	url="${url}/${name}"
-	test "$2" = '-r' && url="${url}/with_replies"
 
-	$ZZWWWDUMP $url |
-		sed '1,70 d' |
-		sed '1,/ View Tweets$/d;/(BUTTON) Try again/,$d' |
-		awk '
-			/ @'$name'/, /\* \(BUTTON\)/ { if(NF>1) print }
-			/Retweeted by /, /\* \(BUTTON\)/ { if(NF>1) print }
-			/retweeted$/, /\* \(BUTTON\)/ { if(NF>1) print }' |
-		sed "
-			/Retweeted by /d
-			/retweeted$/d
-			/  ·  /{s/  ·  .*$/>:/;s/^.*@/@/}
-			/@$name/d
-			/(BUTTON)/d
-			/View summary/d
-			/View conversation/d
-			/^ *YouTube$/d
-			/^ *Play$/d
+	LANG=en zztool dump $url |
+		awk '/^ *@/{imp=1;next};imp' |
+		sed -n '/^ *Tweets *$/,/Back to top/p' |
+		sed '1,/^ *More *$/ d
+			/Copy link to Tweet/d;
+			/Embed Tweet/d;
+			/ followed *$/d
+			s/ *(BUTTON) View translation *//
+			/^ *(BUTTON) */d
+			/ · Details *$/d
+			/ tweeted yet\. *$/d
+			/^   [1-9 ][0-9]\./i \
+
+			/\. Pinned Tweet *$/{N;d;}
+			/ Retweeted *$/{N;d;}
+			/. Retweeted ./d
+			/^    *[1-9 ][0-9]\./d
+			/^ *Translated from /d
+			/^ *View media/d
+			/^ *View summary/d
+			/^ *View conversation/d
 			/^ *View more photos and videos$/d
 			/^ *Embedded image permalink$/d
-			/[0-9,]\{1,\} retweets\{0,1\} [0-9,]\{1,\} favorite/d
-			/Twitter may be over capacity or experiencing a momentary hiccup/d
+			/[0-9,]\{1,\} retweets\{0,1\} [0-9,]\{1,\} like/d #,/[o+] (BUTTON) Embed Tweet/d
+			/^ *Reply *$/,/^ *More */d
+			/[o+] (BUTTON) /d
 			s/\[DEL: \(.\) :DEL\] /\1/g
-			s/^ *//g
-		" |
-		awk '{ if (/>:$/){ sub(/>:$/,": "); printf $0; getline;print } else print }' |
-		sed "$limite q" |
-		sed G
-
-	# Apagando as 70 primeiras linhas usando apenas números,
-	# pois o sed do BSD capota se tentar ler o conteúdo destas
-	# linhas. Leia mais no issue #28.
+			s/^[[:blank:]]*//g
+		' |
+		sed '/. added,$/{N;d;}' |
+		zzsqueeze -l |
+		zztrim |
+		awk -v lim=$limite '
+			BEGIN { print "" }
+			$0 ~ /^[[:blank:]]*$/ {blanks++};{if (blanks>=lim) exit; print}
+			END { print "" }
+			'
 }
 
 # ----------------------------------------------------------------------------
@@ -17323,7 +18741,7 @@ zztweets ()
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2011-05-03
-# Versão: 2
+# Versão: 3
 # Licença: GPL
 # ----------------------------------------------------------------------------
 zzunescape ()
@@ -17366,7 +18784,7 @@ zzunescape ()
 		s/&#0*170;/ª/g;     s/&#x0*AA;/ª/g;     s/&ordf;/ª/g;
 		s/&#0*171;/«/g;     s/&#x0*AB;/«/g;     s/&laquo;/«/g;
 		s/&#0*172;/¬/g;     s/&#x0*AC;/¬/g;     s/&not;/¬/g;
-		s/&#0*173;/ /g;     s/&#x0*AD;/ /g;     s/&shy;/ /g;
+		s/&#0*173;/­/g;      s/&#x0*AD;/­/g;      s/&shy;/­/g;
 		s/&#0*174;/®/g;     s/&#x0*AE;/®/g;     s/&reg;/®/g;
 		s/&#0*175;/¯/g;     s/&#x0*AF;/¯/g;     s/&macr;/¯/g;
 		s/&#0*176;/°/g;     s/&#x0*B0;/°/g;     s/&deg;/°/g;
@@ -17512,10 +18930,10 @@ zzunescape ()
 		s/&#0*8194;/ /g;    s/&#x0*2002;/ /g;   s/&ensp;/ /g;
 		s/&#0*8195;/ /g;    s/&#x0*2003;/ /g;   s/&emsp;/ /g;
 		s/&#0*8201;/ /g;    s/&#x0*2009;/ /g;   s/&thinsp;/ /g;
-		s/&#0*8204;/ /g;    s/&#x0*200C;/ /g;   s/&zwnj;/ /g;
-		s/&#0*8205;/ /g;    s/&#x0*200D;/ /g;   s/&zwj;/ /g;
-		s/&#0*8206;/ /g;    s/&#x0*200E;/ /g;   s/&lrm;/ /g;
-		s/&#0*8207;/ /g;    s/&#x0*200F;/ /g;   s/&rlm;/ /g;
+		s/&#0*8204;/‌/g;     s/&#x0*200C;/‌/g;    s/&zwnj;/‌/g;
+		s/&#0*8205;/‍/g;     s/&#x0*200D;/‍/g;    s/&zwj;/‍/g;
+		s/&#0*8206;/‎/g;     s/&#x0*200E;/‎/g;    s/&lrm;/‎/g;
+		s/&#0*8207;/‏/g;     s/&#x0*200F;/‏/g;    s/&rlm;/‏/g;
 		s/&#0*8211;/–/g;    s/&#x0*2013;/–/g;   s/&ndash;/–/g;
 		s/&#0*8212;/—/g;    s/&#x0*2014;/—/g;   s/&mdash;/—/g;
 		s/&#0*8216;/‘/g;    s/&#x0*2018;/‘/g;   s/&lsquo;/‘/g;
@@ -17608,20 +19026,21 @@ zzunescape ()
 	do
 		case "$1" in
 			--html)
-				filtro="$filtro$html";
+				filtro="$filtro$html"
 				shift
 			;;
 			--xml)
-				filtro="$filtro$xml";
+				filtro="$filtro$xml"
 				shift
 			;;
+			--) shift; break ;;
 			*) break ;;
 		esac
 	done
 
 	# Faz a conversão
 	# Arquivos via STDIN ou argumentos
-	zztool file_stdin "$@" | sed "$filtro"
+	zztool file_stdin -- "$@" | sed "$filtro"
 }
 
 # ----------------------------------------------------------------------------
@@ -17936,6 +19355,9 @@ zzuniq ()
 	# Versão SED, mais lenta para arquivos grandes, mas só precisa do SED
 	# PATT: LINHA ATUAL \n LINHA-1 \n LINHA-2 \n ... \n LINHA #1 \n
 	# sed "G ; /^\([^\n]*\)\n\([^\n]*\n\)*\1\n/d ; h ; s/\n.*//" $1
+
+	# Versãp AWK, dica retirada do twitter de @augustohp
+	# zztool file_stdin "$@" | awk '!line[$0]++'
 }
 
 # ----------------------------------------------------------------------------
@@ -17954,8 +19376,7 @@ zzunix2dos ()
 {
 	zzzz -h unix2dos "$1" && return
 
-	local arquivo
-	local tmp=$(zztool mktemp unix2dos)
+	local arquivo tmp
 	local control_m=$(printf '\r')  # ^M, CR, \r
 
 	# Sem argumentos, lê/grava em STDIN/STDOUT
@@ -17967,12 +19388,15 @@ zzunix2dos ()
 		return
 	fi
 
+	# Definindo arquivo temporário quando há argumentos.
+	tmp=$(zztool mktemp unix2dos)
+
 	# Usuário passou uma lista de arquivos
 	# Os arquivos serão sobrescritos, todo cuidado é pouco
 	for arquivo
 	do
 		# O arquivo existe?
-		zztool arquivo_legivel "$arquivo" || continue
+		zztool -e arquivo_legivel "$arquivo" || continue
 
 		# Adiciona um único CR no final de cada linha
 		cp "$arquivo" "$tmp" &&
@@ -18156,7 +19580,7 @@ zzutf8 ()
 		;;
 
 		# Arquivo vazio ou encoding desconhecido, não mexe
-		'')
+		'' | unknown* | binary )
 			cat "$tmp"
 		;;
 
@@ -18171,301 +19595,56 @@ zzutf8 ()
 
 # ----------------------------------------------------------------------------
 # zzvdp
-# http://vidadeprogramador.com.br
+# https://vidadeprogramador.com.br
 # Mostra o texto das últimas tirinhas de Vida de Programador.
-# Se fornecer uma data, mostra a tirinha do dia escolhido.
-# Você pode informar a data dd/mm/aaaa ou usar palavras: hoje, (ante)ontem.
-# Usando a mesma sintaxe do zzdata
+# Sem opção mostra a tirinha mais recente.
+# Se a opção for um número, mostra a tirinha que ocupa essa ordem
+# Se a opção for 0, mostra todas mais recentes
 #
-# Uso: zzvdp [data [+|- data|número<d|m|a>]]
-# Ex.: zzvdp
-#      zzvdp anteontem
+# Uso: zzvdp [número]
+# Ex.: zzvdp    # Mostra a tirinha mais recente
+#      zzvdp 5  # Mostra a quinta tirinha mais recente
+#      zzvdp 0  # Mostra todas as tirinhas mais recentes
 #
 # Autor: Itamar <itamarnet (a) yahoo com br>
 # Desde: 2013-03-25
-# Versão: 5
+# Versão: 7
 # Licença: GPL
-# Requisitos: zzunescape zzdatafmt
+# Requisitos: zzunescape zzxml
 # ----------------------------------------------------------------------------
 zzvdp ()
 {
 	zzzz -h vdp "$1" && return
 
-	local url="http://vidadeprogramador.com.br"
+	local url="https://vidadeprogramador.com.br"
+	local sep='------------------------------------------------------------------------------'
+	local ord=1
 
-	if test -n "$1" && zztool testa_data $(zzdatafmt "$1")
+	zztool testa_numero "$1" && ord=$1
+
+	zztool source "$url" |
+	awk '
+		/^ *<div.*data-title="/{titulo=$0}
+		/<div class="transcription">/ {print titulo}
+		/<div class="transcription">/,/<\/div>/
+	' |
+	sed '
+		/^ *<div.*data-title="/{s/.*data-title="//;s/".*//;}
+		/"transcription"/s/.*//
+		s/<\/div>/----/
+		' |
+	zzunescape --html |
+	zzxml --untag |
+	if test $ord -eq 0
 	then
-		url="${url}/"$(zzdatafmt -f 'AAAA/MM/DD' $1)
+		sed "/----/{s//$sep/;}"
+	else
+		awk -v ord=$ord '
+			/----/{i++;next}
+			{ if (i==ord-1) print; if (i==ord) {exit} }
+		'
 	fi
 
-	$ZZWWWHTML $url | sed -n '/category-tirinhas/,/<\/article>/p' |
-	sed -n '/<!-- post title -->/,/<!-- \/post title -->/p;/class="transcription"/,/<\/article>/p' |
-	sed 's/<[^>]*>//g;s/^[[:blank:]]*//g' |
-	sed '/^ *Camiseta .*/ a \
-----------------------------------------------------------------------------' |
-	zzunescape --html | uniq
-}
-
-# ----------------------------------------------------------------------------
-# zzve
-# Busca vários indicadores econômicos e financeiros, da Valor Econômico.
-# As opções são categorizadas conforme segue:
-#
-# 1. Indicadores Financeiros
-# 2. Índices Macroeconômicos
-# 3. Mercado Externo
-# 4. Bolsas
-# 5. Commodities
-#
-# Para mais detalhes digite: zzve <número>
-#
-# moedas       Variações de moedas internacionais
-#
-# Uso: zzve <opção>
-# Ex.: zzve tr         # Tabela de Taxa Referencial, Poupança e TBF.
-#      zzve moedas     # Cotações do Dólar, Euro e outras moedas.
-#      zzve 3          # Mais detalhes de ajuda sobre "Mercado Externo".
-#
-# Autor: Itamar <itamarnet (a) yahoo com br>
-# Desde: 2013-07-28
-# Versão: 3
-# Licença: GPL
-# Requisitos: zzuniq
-# ----------------------------------------------------------------------------
-zzve ()
-{
-	zzzz -h ve "$1" && return
-
-	test -n "$1" || { zztool -e uso ve; return 1; }
-
-	case $1 in
-	1)
-		echo "Indicadores Financeiros:
-	contas ou indicadores              Variação dos indicadores no período
-	crédito                            Linhas de crédito
-	tr, poupança ou tbf                Taxa Referencial, Poupança e TBF
-	custo ou dinheiro                  Custo do dinheiro
-	aplicações                         Evolução das aplicações financeiras
-	ima ou anbima                      IMA - Índices de Mercado Anbima
-	mercado                            Indicadores do mercado
-	renda_fixa ou insper               Índice de Renda Fixa Valor/Insper
-	futuro                             Mercado futuro
-	estoque_cetip                      Estoque CETIP
-	volume_cetip                       Volume CETIP
-	cetip                              Estoque e Volume CETIP" | expand -t 2
-		return
-	;;
-	2)
-		echo "Índices Macroeconômicos:
-	atividade                          Atividade econômica
-	inflação                           Variação da Inflação
-	produção ou investimento           Produção e investimento
-	dívida_pública ou pública          Dívida e necessidades de financiamento
-	receitas_tributária ou tributária  Principais receitas tributárias
-	resultado_fiscal ou fiscal         Resultado fiscal do governo central
-	previdenciaria ou previdência      Contribuição previdenciária
-	ir_fonte                           IR na fonte
-	ir_quota                           Imposto de Renda Pessoa Física" | expand -t 2
-		return
-	;;
-	3)
-		echo "Mercado Externo:
-	bonus                              Bônus corporativo
-	captação                           Captações de recursos no exterior
-	juros_externos                     Juros externos
-	cds                                Prêmio de risco do CDS
-	reservas_internacionais            Reservas internacionais" | expand -t 2
-		return
-	;;
-	4)
-		echo "Bolsa Nacional:
-	cotações                           Cotações intradia
-	investimento                       Investimentos, debêntures e títulos
-	direitos                           Direitos e recibos
-	imobiliário                        Fundo imobiliário
-	vista                              Mercado à vista
-	compra                             Opções de compra
-	venda                              Opções de venda
-	venda_indice                       Opções de venda de índice
-	recuperação                        Recuperação judicial
-
-Bolsas Internacionais:
-	adr_brasil ou adr                  ADR Brasil
-	adr_indices                        ADR - Índices
-	bolsas                             Bolsas de valores internacionais" | expand -t 2
-		return
-	;;
-	5)
-		echo "Commodities:
-	agrícolas                          Indicadores
-	óleo_soja                          Óleo de Soja
-	farelo ou farelo_soja              Farelo de Soja
-	óleo_vegetal                       Óleos Vegetais
-	suco_laranja                       Suco de Laranja
-	estoque_metais                     Estoques de Metais
-
-	Outro itens em commodities:
-		açucar       algodão      arroz              batata
-		bezerro      boi          cacau              ovos
-		café         cebola       etanol             feijão
-		frango       laranja      laticínios         madeira
-		madioca      milho        trigo              soja
-		suínos ou porcos
-		metais       cobre        outros_metais      petróleo" | expand -t 2
-		return
-	;;
-	esac
-
-	local url_base='http://www.valor.com.br/valor-data'
-	local fim='Ver tabela completa'
-	local url_atual url inicio
-
-	# Índices Financeiros - Créditos e Taxas
-	url_atual="${url_base}/indices-financeiros/creditos-e-taxas-referenciais"
-	case "$1" in
-		contas | indicadores)   inicio='Variação dos indicadores no período'; url=$url_atual;;
-		cr[eé]dito)             inicio='Crédito *$'; url=$url_atual;;
-		tr | poupan[çc]a | tbf) inicio='Taxa Referencial, Poupança e TBF'; url=$url_atual;;
-	esac
-
-	# Índides Financeiros - Mercado
-	url_atual="${url_base}/indices-financeiros/indicadores-de-mercado"
-	case "$1" in
-		custo | dinheiro)                   inicio='Custo do dinheiro'; url=$url_atual;;
-		aplica[çc][ãa]o | aplica[çc][oõ]es) inicio='Evolução das aplicações financeiras'; url=$url_atual;;
-		ima | anbima)                       inicio='IMA - Índices de Mercado Anbima'; url=$url_atual;;
-		mercado)                            inicio='Indicadores do mercado'; url=$url_atual;;
-		renda_fixa | insper)                inicio='Índice de Renda Fixa Valor'; url=$url_atual;;
-		futuro)                             inicio='Mercado futuro'; url=$url_atual;;
-		estoque_cetip)                      inicio='Estoque CETIP'; url=$url_atual;;
-		volume_cetip)                       inicio='Volume CETIP'; url=$url_atual;;
-		cetip)
-			zzve estoque_cetip
-			echo
-			zzve volume_cetip
-			return
-		;;
-	esac
-
-	# Índices Macroeconômicos - Atividade Econômica
-	url_atual="${url_base}/indices-macroeconomicos/atividade-economica"
-	case "$1" in
-		atividade)                     inicio='Atividade econômica'; url=$url_atual;;
-		infla[çc][ãa]o)                inicio='Inflação'; url=$url_atual;;
-		produ[çc][ãa]o | investimento) inicio='Produção e investimento'; url=$url_atual;;
-	esac
-
-	# Índices Macroeconômicos - Finanças Públicas
-	url_atual="${url_base}/indices-macroeconomicos/financas-publicas"
-	case "$1" in
-		d[íi]vida_p[úu]blica | p[úu]blica)      inicio='Dívida e necessidades de financiamento'; url=$url_atual;;
-		receitas_tribut[áa]ria | tribut[áa]ria) inicio='Principais receitas tributárias'; url=$url_atual;;
-		resultado_fiscal | fiscal)              inicio='Resultado fiscal do governo central'; url=$url_atual;;
-	esac
-
-	# Índice Macroeconômicos - Tributos
-	url_atual="${url_base}/indices-macroeconomicos/tributos"
-	case "$1" in
-		previdenciaria | previd[êe]ncia) inicio='Contribuição previdenciária'; url=$url_atual;;
-		ir_fonte)                        inicio='IR na fonte'; url=$url_atual;;
-		ir_quota)                        inicio='Imposto de Renda Pessoa Física'; url=$url_atual;;
-	esac
-
-	# Commodities - Agrícolas
-	url_atual="${url_base}/commodities/agricolas"
-	case "$1" in
-		agr[íi]colas)         inicio='Indicadores *$'; url=$url_atual;;
-		a[çc]ucar)            inicio='Açúcar'; url=$url_atual;;
-		algod[ãa]o)           inicio='Algodão'; url=$url_atual;;
-		arroz)                inicio='Arroz'; url=$url_atual;;
-		batata)               inicio='Batata'; url=$url_atual;;
-		bezerro)              inicio='Bezerro'; url=$url_atual;;
-		boi)                  inicio='Boi'; url=$url_atual;;
-		cacau)                inicio='Cacau'; url=$url_atual;;
-		caf[ée])              inicio='Café *$'; url=$url_atual;;
-		cebola)               inicio='Cebola'; url=$url_atual;;
-		etanol)               inicio='Etanol'; url=$url_atual;;
-		farelo | farelo_soja) inicio='Farelo de Soja'; url=$url_atual;;
-		[óo]leo_soja)         inicio='Óleo de Soja'; url=$url_atual;;
-		feij[ãa]o)            inicio='Feijão'; url=$url_atual;;
-		frango)               inicio='Frango'; url=$url_atual;;
-		laranja)              inicio='Laranja'; url=$url_atual;;
-		latic[íi]nios)        inicio='Laticínios'; url=$url_atual;;
-		madeira)              inicio='Madeira'; url=$url_atual;;
-		mandioca)             inicio='Mandioca'; url=$url_atual;;
-		milho)                inicio='Milho'; url=$url_atual;;
-		[óo]leo_vegetal)      inicio='Óleos Vegetais'; url=$url_atual;;
-		ovos)                 inicio='Ovos'; url=$url_atual;;
-		soja)                 inicio='Soja *$'; url=$url_atual;;
-		suco_laranja)         inicio='Suco de Laranja'; url=$url_atual;;
-		su[íi]nos | porcos)   inicio='Suínos'; url=$url_atual;;
-		trigo)                inicio='Trigo'; url=$url_atual;;
-	esac
-
-	# Commodities - Minerais
-	url_atual="${url_base}/commodities/minerais"
-	case "$1" in
-		cobre)          inicio='Cobre'; url=$url_atual;;
-		estoque_metais) inicio='Estoques de Metais'; url=$url_atual;;
-		metais)         inicio='Metais'; url=$url_atual;;
-		outros_metais)  inicio='Outros metais'; url=$url_atual;;
-		petr[óo]leo)    inicio='Petróleo'; url=$url_atual;;
-	esac
-
-	# Mercado Externo - Captações de Recursos no Exterior
-	url_atual="${url_base}/internacional/mercado-externo"
-	case "$1" in
-		bonus)                   inicio='Bônus corporativo';url=$url_atual;;
-		capta[çc][ãa]o)          inicio='Captações de recursos no exterior'; url=$url_atual;;
-		juros_externos)          inicio='Juros externos'; url=$url_atual;;
-		cds)                     inicio='Prêmio de risco do CDS'; url=$url_atual;;
-		reservas_internacionais) inicio='Reservas internacionais'; url=$url_atual;;
-	esac
-
-	# Bolsa Nacional
-	url_atual="${url_base}/bolsas/nacionais"
-	case "$1" in
-		cota[cç][oõ]es)    inicio='Cotações intradia';url=$url_atual;;
-		investimento)      inicio='Certificados de investimentos, debêntures e outros títulos';url=$url_atual;;
-		direitos)          inicio='Direitos e recibos';url=$url_atual;;
-		imobili[aá]rio)    inicio='Fundo imobiliário';url=$url_atual;;
-		vista)             inicio='Mercado à vista';url=$url_atual;;
-		compra)            inicio='Opções de compra';url=$url_atual;;
-		venda)             inicio='Opções de venda';url=$url_atual;;
-		venda_indice)      inicio='Opções de venda de índice';url=$url_atual;;
-		recupera[cç][aã]o) inicio='Recuperação judicial';url=$url_atual;;
-	esac
-
-	# Bolsas Internacionais
-	url_atual="${url_base}/bolsas/internacionais"
-	case "$1" in
-		adr_brasil| adr) inicio='ADR Brasil';url=$url_atual;;
-		adr_indices)     inicio='ADR - Índices';url=$url_atual;;
-		bolsas)          inicio='Bolsas de valores internacionais';url=$url_atual;;
-	esac
-
-	# Moedas estrangeiras
-	case "$1" in
-		moedas)
-			inicio='Dólar & Euro'
-			fim='Valor'
-			url="${url_base}/moedas"
-		;;
-	esac
-
-	$ZZWWWDUMP "$url" |
-		sed -n "/^ *${inicio}/,/^ *${fim}/p" |
-		if test "$1" = "investimento"
-		then
-			zzuniq
-		else
-			cat -
-		fi |
-		sed '/^[:space:]*$/d;$d' |
-		awk '{
-			if ($0 ~ /^ *Fonte/) { print ""; print $0; print ""}
-			else {print $0}
-		}'
 }
 
 # ----------------------------------------------------------------------------
@@ -18473,13 +19652,14 @@ Bolsas Internacionais:
 # Vira um texto, de trás pra frente (rev) ou de ponta-cabeça.
 # Ideia original de: http://www.revfad.com/flip.html (valeu @andersonrizada)
 #
-# Uso: zzvira [-X] texto
+# Uso: zzvira [-X|-E] texto
 # Ex.: zzvira Inverte tudo             # odut etrevnI
 #      zzvira -X De pernas pro ar      # ɹɐ oɹd sɐuɹǝd ǝp
+#      zzvira -E De pernas pro ar      # pǝ dǝɹuɐs dɹo ɐɹ
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2010-05-24
-# Versão: 2
+# Versão: 3
 # Licença: GPL
 # Requisitos: zzsemacento zzminusculas
 # ----------------------------------------------------------------------------
@@ -18493,17 +19673,26 @@ zzvira ()
 	then
 		rasteira=1
 		shift
+	elif test "$1" = '-E'
+	then
+		rasteira=2
+		shift
 	fi
 
 	# Dados via STDIN ou argumentos
 	zztool multi_stdin "$@" |
 
 	# Vira o texto de trás pra frente (rev)
-	sed '
+	if test -z "$rasteira" || test "$rasteira" -ne 2
+	then
+		sed '
 		/\n/!G
 		s/\(.\)\(.*\n\)/&\2\1/
 		//D
-		s/.//' |
+		s/.//'
+	else
+		cat -
+	fi |
 
 	if test -n "$rasteira"
 	then
@@ -18514,6 +19703,145 @@ zzvira ()
 			sed 's/\[/X/g ; s/]/[/g ; s/X/]/g'
 	else
 		cat -
+	fi
+}
+
+# ----------------------------------------------------------------------------
+# zzwc
+# Contabiliza total de bytes, caracteres, palavras ou linhas de um arquivo.
+# Ou exibe tamanho da maior linha em bytes, caracteres ou palavras.
+# Opcionalmente exibe as maiores linhas, desse arquivo.
+# Também aceita receber dados pela entrada padrão (stdin).
+# É uma emulação do comando wc, que não contabiliza '\r' e '\n'.
+#
+# Opções:
+#   -c  total de bytes
+#   -m  total de caracteres
+#   -l  total de linhas
+#   -w  total de palavras
+#   -C, -L, -W  maior linha em bytes, caracteres ou palavras respectivamente
+#   -p Exibe a maior linha em bytes, caracteres ou palavras,
+#      usado junto com as opções -C, -L e -W.
+#
+#    Se as opções forem omitidas adota -l -w -c por padrão.
+#
+# Uso: zzwc [-c|-C|-m|-l|-L|-w|-W] [-p] arquivo
+# Ex.: echo "12345"       | zzwc -c     # 5
+#      printf "abcde"     | zzwc -m     # 5
+#      printf "abc\123"   | zzwc -l     # 2
+#      printf "xz\n789\n" | zzwc -L     # 3
+#      printf "wk\n456"   | zzwc -M -p  # 456
+#
+# Autor: Itamar <itamarnet (a) yahoo com br>
+# Desde: 2016-03-10
+# Versão: 1
+# Licença: GPL
+# ----------------------------------------------------------------------------
+zzwc ()
+{
+	zzzz -h wc "$1" && return
+
+	local tb tc tl tw mb mc mw p conteudo saida linha
+
+	# Opções de linha de comando
+	while test "${1#-}" != "$1"
+	do
+		case "$1" in
+			-c) tb=0  ;;
+			-m) tc=0  ;;
+			-l) tl=0  ;;
+			-w) tw=0  ;;
+			-p) p=1   ;;
+			-C) mb=0  ;;
+			-L) mc=0  ;;
+			-W) mw=0  ;;
+			--) shift; break ;;
+			-*) zztool -e uso wc; return 1 ;;
+			* ) break ;;
+		esac
+		shift
+	done
+
+	if test -z "${tb}${tc}${tl}${tw}${mb}${mc}${mw}"
+	then
+		tb=0; tl=0; tw=0
+	fi
+
+	conteudo=$(zztool file_stdin -- "$@" | sed '${ s/$/ /; }')
+
+	# Linhas
+	if test -n "$tl"
+	then
+		tl=$(echo "$conteudo" | zztool num_linhas)
+		saida="$tl"
+	fi
+
+	# Palavras
+	if test -n "$tw"
+	then
+		tw=$(echo "$conteudo" | wc -w | tr -d -c '[0-9]')
+		test -n "$saida" && saida="$saida|$tw" || saida="$tw"
+	fi
+
+	# Caracteres
+	if test -n "$tc"
+	then
+		tc=$(echo "$conteudo" | sed 's/././g' | tr -d '\r\n' | wc -c)
+		tc=$((tc-1))
+		test -n "$saida" && saida="$saida|$tc" || saida="$tc"
+	fi
+
+	# Bytes
+	if test -n "$tb"
+	then
+		tb=$(echo "$conteudo" | tr -d '\r\n' | wc -c)
+		tb=$((tb-1))
+		test -n "$saida" && saida="$saida|$tb" || saida="$tb"
+	fi
+
+	# Saida do resultado dos linhas, palavras, caracteres e/ou bytes.
+	if test -n "$saida"
+	then
+		echo "$saida" | tr '|' '\t'
+	fi
+
+	# Exibição do tamanho ou da(s) linha(s) mais longa(s)
+	if test -n "${mb}${mc}${mw}"
+	then
+		maior=$(
+		echo "$conteudo" |
+		while read linha
+		do
+			printf "%s" "$linha" |
+			if test -n "$mb"
+			then
+				wc -c
+			elif test -n "$mc"
+			then
+				sed 's/[^[:cntrl:]]/./g' | awk 'BEGIN {FS=""} { print NF }'
+			elif test -n "$mw"
+			then
+				wc -w
+			fi
+		done |
+		awk -v end_sed="$p" '
+			{ linha[NR]=$1 ; maior=(maior<$1?$1:maior) }
+			END {
+				if (length(end_sed)) {
+					for (i=1;i<=NR;i++) {
+						if (linha[i]==maior) printf i "p;"
+					}
+				}
+				else { print maior }
+			}'
+		)
+
+		if test -n "$p"
+		then
+			echo "$conteudo" | sed -n "$maior"
+		else
+			echo "$maior"
+		fi
 	fi
 }
 
@@ -18555,7 +19883,7 @@ zzwikipedia ()
 
 	# Faz a consulta e filtra o resultado, paginando
 	url="http://$idioma.wikipedia.org/wiki/"
-	$ZZWWWDUMP "$url$(echo "$*" | sed 's/  */_/g')" |
+	zztool dump "$url$(echo "$*" | sed 's/  */_/g')" |
 		sed '
 			# Limpeza do conteúdo
 			/^Views$/,$ d
@@ -18570,15 +19898,18 @@ zzwikipedia ()
 			/^  *Origem: Wikipédia,/d
 			/^  *Jump to: /d
 			/^  *Ir para: /d
+			/^  *Link: /d
 			/^  *This article does not cite any references/d
-			/^  *Este artigo ou se(c)ção/d
-			/^  *Esta página ou secção/d
+			/  *Este artigo ou se(c)ção não cita fontes confiáveis/d
+			/  *Esta página ou secção não cita fontes confiáveis/d
 			/^  *Please help improve this article/d
 			/^  *Por favor, melhore este artigo/d
 			/^  *—*Encontre fontes: /d
 			/\.svg$/d
 			/^  *Categorias* ocultas*:/,$d
 			/^  *Hidden categories:/,$d
+			/^  *\[IMG\]$/d
+			/^  *Ampliar$/d
 			/^  *Wikipedia does not have an article with this exact name./q
 			s/\[edit\]//; s/\[edit[^]]*\]//
 			s/\[editar\]//; s/\[editar[^]]*\]//
@@ -18620,21 +19951,21 @@ zzwikipedia ()
 #
 # Autor: Aurelio Marinho Jargas, www.aurelio.net
 # Desde: 2011-05-03
-# Versão: 13
+# Versão: 15
 # Licença: GPL
-# Requisitos: zzjuntalinhas zzuniq
+# Requisitos: zzjuntalinhas zzuniq zzunescape
 # ----------------------------------------------------------------------------
 zzxml ()
 {
 	zzzz -h xml "$1" && return
 
-	local tag notag semtag ntag sed_notag
+	local tag notag semtag ntag sed_notag sep cache_tag cache_notag
 	local tidy=0
 	local untag=0
 	local unescape=0
 	local indent=0
-	local cache_tag=$(zztool mktemp xml.tag)
-	local cache_notag=$(zztool mktemp xml.notag)
+
+	sep=$(echo '&thinsp;' | zzunescape --html)
 
 	# Opções de linha de comando
 	while test "${1#-}" != "$1"
@@ -18691,10 +20022,14 @@ zzxml ()
 				zzuniq
 				return
 			;;
+			--        ) shift; break;;
 			--*       ) zztool erro "Opção inválida $1"; return 1;;
 			*         ) break;;
 		esac
 	done
+
+	cache_tag=$(zztool mktemp xml.tag)
+	cache_notag=$(zztool mktemp xml.notag)
 
 	# Montando script awk para excluir tags
 	if test -n "$notag"
@@ -18703,10 +20038,10 @@ zzxml ()
 		for ntag in $notag
 		do
 			echo '
-				if ($0 ~ /<'$ntag'[^\/>]* >/) { notag++ }
-				if ($0 ~ /<\/'$ntag' >/) { notag--; if (notag==0) { next } }
+				if ($0 ~ /<'$ntag' [^>]*[^\/>]>/) { notag++ }
+				if ($0 ~ /<\/'$ntag'  >/) { notag--; if (notag==0) { next } }
 			' >> $cache_notag
-			sed_notag="$sed_notag /<${ntag}[^/>]*\/>/d;"
+			sed_notag="$sed_notag /<${ntag} [^>]*\/>/d;"
 		done
 		echo 'if (notag==0) { nolinha[NR] = $0 } }' >> $cache_notag
 	fi
@@ -18723,10 +20058,10 @@ zzxml ()
 		for ntag in $tag
 		do
 			echo '
-				if ($0 ~ /^<'$ntag'[^><]*\/>$/) { linha[NR] = $0 }
-				if ($0 ~ /^<'$ntag'[^><]*[^\/><]+>/) { tag['$ntag']++ }
+				if ($0 ~ /^<'$ntag' [^>]*\/>$/) { linha[NR] = $0 }
+				if ($0 ~ /^<'$ntag' [^>]*[^\/>]>/) { tag['$ntag']++ }
 				if (tag['$ntag']>=1) { linha[NR] = $0 }
-				if ($0 ~ /^<\/'$ntag' >/) { tag['$ntag']-- }
+				if ($0 ~ /^<\/'$ntag'  >/) { tag['$ntag']-- }
 			' >> $cache_tag
 		done
 		echo '}' >> $cache_tag
@@ -18737,12 +20072,12 @@ zzxml ()
 	then
 		for ntag in $semtag
 		do
-			sed_notag="$sed_notag s|<[/]\{0,1\}${ntag}[^>]*>||g;"
+			sed_notag="$sed_notag s|<[/]\{0,1\}${ntag} [^>]*>||g;"
 		done
 	fi
 
 	# Caso indent=1 mantém uma tag por linha para possibilitar indentação.
-	if test -n "$tag" 
+	if test -n "$tag"
 	then
 		if test $tidy -eq 0
 		then
@@ -18751,7 +20086,7 @@ zzxml ()
 			echo 'END { for (lin=1;lin<=NR;lin++) { if (lin in linha) print linha[lin] } }' >> $cache_tag
 		fi
 	fi
-	if test -n "$notag" 
+	if test -n "$notag"
 	then
 		if test $tidy -eq 0
 		then
@@ -18776,7 +20111,7 @@ zzxml ()
 	# esquema precisará ser revisto.
 
 	# Arquivos via STDIN ou argumentos
-	zztool file_stdin "$@" |
+	zztool file_stdin -- "$@" |
 
 	zzjuntalinhas -i "<!--" -f "-->" |
 
@@ -18801,22 +20136,34 @@ zzxml ()
 			#                            </b>
 			#                            </p>
 
-			zzjuntalinhas -d ' ' |
+			# Usando um tipo especial de espaço com zzjuntalinhas
+			zzjuntalinhas -d "$sep" |
 			sed '
+				:ini
+				/>'$sep'*</ {
+					s//>\
+</
+					t ini
+				}
+
 				# quebra linha na abertura da tag
 				s/</\
 </g
 				# quebra linha após fechamento da tag
-				s/>/ >\
-/g' | sed 's|/ >|/>|g' |
+				s/ *>/  >\
+/g' |
 			# Rejunta o conteúdo do <![CDATA[...]]>, que pode ter tags
 			zzjuntalinhas -i '^<!\[CDATA\[' -f ']]>$' -d '' |
 
 			# Remove linhas em branco (as que adicionamos)
-			sed '/^[[:blank:]]*$/d'
+			sed "/^[[:blank:]$sep]*$/d"
 		else
-			cat -
+			# Espaço antes do fechamento da tag (Recurso usado no script para tag não ambígua)
+			sed 's/ *>/  >/g'
 		fi |
+
+		# Corrigindo espaço de fechamento de tag única  (Recurso usado no script para tag não ambígua)
+		sed 's|/  *>|  />|g' |
 
 		# --notag
 		# É sempre usada em conjunto com --tidy (automaticamente)
@@ -18844,14 +20191,17 @@ zzxml ()
 			cat -
 		fi |
 
-		# --tidy (segunda parte)
-		# Eliminando o espaço adicional colocado antes do fechamento da tag.
-		if test $tidy -eq 1
-		then
-			sed 's| >|>|g'
-		else
-			cat -
-		fi |
+		# Eliminando o espaço adicional colocado antes do fechamento das tags.
+		sed 's| *>|>|g;s|  */>| />|g' |
+
+		# Removendo ou trocando um tipo de espaço especial usado com zzjuntalinhas
+		sed "
+			s/\([[:blank:]]\)$sep/\1/g
+			s/$sep\([[:blank:]]\)/\1/g
+			s/^$sep//
+			s/$sep$//
+			s/$sep/ /g
+		" |
 
 		# --indent
 		# Indentando conforme as tags que aparecem, mantendo alinhamento.
@@ -18911,13 +20261,7 @@ zzxml ()
 		# --unescape
 		if test $unescape -eq 1
 		then
-			sed "
-				s/&quot;/\"/g
-				s/&amp;/\&/g
-				s/&apos;/'/g
-				s/&lt;/</g
-				s/&gt;/>/g
-				"
+			zzunescape --xml
 		else
 			cat -
 		fi
@@ -19109,11 +20453,11 @@ then
 		echo "$ZZOFF" |
 		zztool list2lines |
 		sed 's/^zz// ; s/^/zz/' |
-		egrep -v "$(echo $ZZBASE | sed 's/ /|/g')"
+		egrep -v "$(echo "$ZZBASE" | sed 's/ /|/g')"
 	)
 
 	# Desliga todas em uma só linha (note que não usei aspas)
-	unset $zz_off
+	unset zz_off
 
 	# Agora apaga os textos da ajuda, montando um script em sed e aplicando
 	# Veja issue 5 para mais detalhes:
