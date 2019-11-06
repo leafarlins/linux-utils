@@ -40,7 +40,7 @@ function instala_pacotes () {
     echo "### Iniciando instalacoes..."
     [ -z $TST ] && prepara_ntst || prepara_tst
     echo "## Instalando pacotes"
-    LATEX="texlive texlive-latex texlive-collection-langportuguese texlive-tocbibind texlive-titlesec texlive-relsize texlive-subfigure texlive-lastpage texlive-algorithm2e texlive-cleveref texmaker texlive-hypernat texlive-boites texlive-needspace texlive-examplep texlive-example texlive-cprotect texlive-algorithmicx texlive-stmaryrd"
+    LATEX="texlive texlive-latex texlive-collection-langportuguese texlive-tocbibind texlive-titlesec texlive-relsize texlive-subfigure texlive-lastpage texlive-algorithm2e texlive-cleveref texmaker texlive-hypernat texlive-boites texlive-needspace texlive-examplep texlive-example texlive-cprotect texlive-algorithmicx texlive-stmaryrd texlive-appendix"
     sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
     sudo dnf -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
     sudo dnf config-manager --add-repo=https://negativo17.org/repos/fedora-uld.repo
