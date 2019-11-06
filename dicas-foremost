@@ -1,2 +1,0 @@
-# Recuperando arquivos jpg de determinado diretorio
-sudo foremost -t jpg -i /dev/sdb1 -o /Backup/notebook
