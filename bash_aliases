@@ -1,6 +1,7 @@
 ###
 alias la='ls -la'
 alias pje='/home/rlins/git/equipe/pjessh/pje.sh'
+alias mvn='/home/rlins/Documentos/Cursos/Alura-Maven/apache-maven-3.5.4/bin/mvn'
 
 ######## Alias para cpu/mem #########
 ## pass options to free ## 

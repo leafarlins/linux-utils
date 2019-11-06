@@ -67,6 +67,7 @@ while read line; do
     
     echo "Nova linha:   $line"
   fi
+  # else ... grep -P "(:?^[0-9]+$|^$)" para definir texto
   echo $line >> "$ARQ.2"
 done < "$ARQ"
 
