@@ -73,4 +73,5 @@ export ZZOFF=""  # desligue funcoes indesejadas
 export ZZPATH="$HOME/github/linux-utils/funcoeszz.sh"  # script v 18.3
 source "$ZZPATH"
 source "$HOME/github/linux-utils/futils.sh" # script futils
-xhost + && clear
+#xhost + && clear
+#source /usr/local/bin/activate.sh

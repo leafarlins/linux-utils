@@ -15,7 +15,9 @@ The command above will expand in 2 seconds and create a modified srt file `subt.
 
 ### flacconvert
 
-This script will convert all .flac files from the current directory to mp3 files. Just run `flacconvert`.
+This script will convert all .flac files from the current directory to mp3 files. Just run `flacconvert`. You can set a audio birate with -b:
+
+`flacconvert -b 320`
 
 ### funcoeszz
 
@@ -35,6 +37,13 @@ Command line tips.
 
 * Convert avi using mp3codec
  `ffmpeg -i "input.mkv" -f avi -c:v mpeg4 -b:v 4000k -c:a libmp3lame -b:a 320k "converted.avi"`
+
+* Reduce a video size
+```
+ffmpeg -i input.mkv -vf "scale=iw/2:ih/2" half_the_frame_size.mkv
+ffmpeg -i input.mkv -vf "scale=iw/3:ih/3" a_third_the_frame_size.mkv
+ffmpeg -i input.mkv -vf "scale=iw/4:ih/4" a_fourth_the_frame_size.mkv
+```
 
 ### Image
 

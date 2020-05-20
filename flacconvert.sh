@@ -10,6 +10,19 @@ while [ "$1" != '' ]; do
     -suf | -s ) shift
       SUFNAME=" $1"
   ;;
+     -b ) shift
+      BIRATE="-b $1"
+  ;;
+     -h | --help)
+      echo "Uso: $0
+Utilize dentro do diretório com arquivos .flac
+
+-pre     Add prename to output file
+-suf     Add sufix to output file
+-b       Configure birate of mp3 file (128|160|192|320)
+      "
+      exit 0
+  ;;
     * ) echo "Parametro invalido."
   esac
   shift
@@ -29,7 +42,7 @@ for a in *.flac; do
   DATE=$(metaflac "$a" --show-tag=DATE | sed s/.*=//g)
 
   # stream flac into the lame encoder
-  flac -c -d "$a" | lame -V0 --add-id3v2 --pad-id3v2 --ignore-tag-errors \
+  flac -c -d "$a" | lame -V0 --add-id3v2 --pad-id3v2 --ignore-tag-errors $BIRATE \
     --ta "$ARTIST" --tt "$TITLE" --tl "$ALBUM"  --tg "${GENRE:-12}" \
     --tn "${TRACKNUMBER:-0}" --ty "$DATE" - "$OUTF"
 done

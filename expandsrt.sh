@@ -71,5 +71,7 @@ while read line; do
   echo $line >> "$ARQ.2"
 done < "$ARQ"
 
-
+# Renomeiamento de arquivos
+mv "$ARQ" "${ARQ/.srt/pt.srt}"
+mv "$ARQ.2" "${ARQ/.srt.2/.srt}" 
 

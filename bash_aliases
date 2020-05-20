@@ -26,3 +26,4 @@ alias pscpu10='ps auxf | sort -nr -k 3 | head -10'
 #alias pegaperfil="$HOME/Copy/Scripts/Facebook/pegaperfil.sh"
 alias flacconvert="$HOME/github/linux-utils/flacconvert.sh"
 alias expandsrt="$HOME/github/linux-utils/expandsrt.sh"
+alias PyCharm="/home/rlins/Documentos/Python/pycharm-community-2019.3.1/bin/pycharm.sh"

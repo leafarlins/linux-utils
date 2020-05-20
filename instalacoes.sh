@@ -45,6 +45,8 @@ function instala_pacotes () {
     sudo dnf -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
     sudo dnf config-manager --add-repo=https://negativo17.org/repos/fedora-uld.repo
     erro "Falha na instalação de pacotes."
+    sudo dnf install -y $(curl -sL "https://api.github.com/repos/atom/atom/releases/latest" | grep "https.*atom.x86_64.rpm" | cut -d '"' -f 4)
+    erro "Falha na instalação do atom."
     sudo dnf -y install $PACOTES $LATEX
     erro "Falha na instalação de pacotes."
     echo "## Atualizando pacotes"
@@ -52,56 +54,24 @@ function instala_pacotes () {
     
     # Codecs de audio e video
     instala_codecs
-    
-    instala_loffice
 }
 
 function instala_codecs() {
 	echo "## Instalando codecs..."
 	sudo dnf -y localinstall --nogpgcheck http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-stable.noarch.rpm
-	sudo dnf -y install gstreamer gstreamer-ffmpeg gstreamer-plugins-bad gstreamer-plugins-bad-free gstreamer-plugins-bad-free-extras gstreamer-plugins-bad-nonfree gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugins-ugly faad2 faac libdca compat-libstdc++-33 compat-libstdc++-296 xine-lib-extras-freeworld flac lame
+	sudo dnf -y install gstreamer gstreamer-ffmpeg gstreamer-plugins-bad gstreamer-plugins-bad-nonfree gstreamer-plugins-base gstreamer-plugins-ugly faad2 faac libdca xine-lib-extras-freeworld flac lame
    erro "Falha na instalação de pacotes."
 }
 
-function instala_loffice() {
-   dnf -y install libreoffice
-   dnf -y install libreoffice-langpack-pt-BR
-}
-
-function instala_loffice_old () {
-   # LibreOffice 5.0.2
-   VER='5.0.2'
-   LOVERSAO="LibreOffice_$VER""_Linux_x86-64_rpm"
-   LOLANG="LibreOffice_$VER""_Linux_x86-64_rpm_langpack_pt-BR"
-   ERROMSG="## >> ERRO na instalação do libreoffice, confira link de versao. << ##"
-   echo "## Instalando LibreOffice $VER"
-   cd /tmp
-   wget http://download.documentfoundation.org/libreoffice/stable/$VER/rpm/x86_64/$LOVERSAO.tar.gz -O $LOVERSAO.tar.gz
-   erro "$ERROMSG. Problema no download."
-   
-      sudo yum remove -y openoffice* libreoffice*
-      tar -xvf $LOVERSAO.tar.gz
-      cd /tmp/LibreOffice_*Linux_x86-64_rpm/RPMS/
-      sudo yum localinstall -y *.rpm
-      erro "$ERROMSG"
-      cd /tmp
-      wget http://download.documentfoundation.org/libreoffice/stable/$VER/rpm/x86_64/$LOLANG.tar.gz -O $LOLANG.tar.gz
-      erro "$ERROMSG"
-      tar -xvf $LOLANG.tar.gz
-      cd /tmp/*langpack_pt-BR/RPMS/
-      sudo yum localinstall -y *.rpm
-      erro "$ERROMSG"
-}
-
 function prepara_ntst() {
-   NTSTPKG=' tuxguitar amarok kdenlive sound-juicer xchat'
+   NTSTPKG=' tuxguitar amarok kdenlive sound-juicer audacity transmission anki'
    PACOTES+="$NTSTPKG"
 	echo "## Adicionando pacotes para ambiente fora do trabalho"
 	echo "$NTSTPKG"
 }
 
 function prepara_tst() {
-   TSTPKG=' pgadmin3 libvtemm expect system-config-printer meld rdesktop'
+   TSTPKG=' pgadmin3 libvtemm expect system-config-printer'
    PACOTES+="$TSTPKG"
 	echo "## Adicionando pacotes para ambiente de trabalho"
 	echo "$TSTPKG"
@@ -195,7 +165,7 @@ function usage() {
 
 # Variaveis #
 
-PACOTES='wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc mozilla-vlc pidgin gnome-subtitles gimp lifeograph audacity uld foremost'
+PACOTES='wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc pidgin gnome-subtitles gimp lifeograph audacity uld foremost libreoffice libreoffice-langpack-pt-BR meld VirtualBox'
 
 while [ "$1" != '' ]; do
    case $1 in
@@ -233,8 +203,9 @@ $Y && EXEC='y' || read EXEC
 case "$EXEC" in
    yes | y | Y | s | S | sim )
       instala_pacotes  
-      clonar_repos_git
-      customizar
+      #clonar_repos_git
+      #customizar
+      ;;
    *)
       echo "Abortando"
       exit 0
