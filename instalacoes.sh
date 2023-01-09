@@ -41,9 +41,12 @@ function instala_pacotes () {
     [ -z $TST ] && prepara_ntst || prepara_tst
     echo "## Instalando pacotes"
     LATEX="texlive texlive-latex texlive-collection-langportuguese texlive-tocbibind texlive-titlesec texlive-relsize texlive-subfigure texlive-lastpage texlive-algorithm2e texlive-cleveref texmaker texlive-hypernat texlive-boites texlive-needspace texlive-examplep texlive-example texlive-cprotect texlive-algorithmicx texlive-stmaryrd texlive-appendix"
-    sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
-    sudo dnf -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
-    sudo dnf config-manager --add-repo=https://negativo17.org/repos/fedora-uld.repo
+    #sudo rpm -ivh http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-stable.noarch.rpm
+    sudo dnf install https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
+    sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
+    sudo sh -c 'echo -e "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo'
+    #sudo dnf -y install http://linuxdownload.adobe.com/adobe-release/adobe-release-x86_64-1.0-1.noarch.rpm
+    #sudo dnf config-manager --add-repo=https://negativo17.org/repos/fedora-uld.repo
     erro "Falha na instalação de pacotes."
     sudo dnf install -y $(curl -sL "https://api.github.com/repos/atom/atom/releases/latest" | grep "https.*atom.x86_64.rpm" | cut -d '"' -f 4)
     erro "Falha na instalação do atom."
@@ -53,7 +56,7 @@ function instala_pacotes () {
     sudo dnf -y update
     
     # Codecs de audio e video
-    instala_codecs
+    #instala_codecs
 }
 
 function instala_codecs() {
@@ -64,7 +67,8 @@ function instala_codecs() {
 }
 
 function prepara_ntst() {
-   NTSTPKG=' tuxguitar amarok kdenlive sound-juicer audacity transmission anki'
+   NTSTPKG=' tuxguitar amarok  sound-juicer audacity transmission anki'
+   #kdenlive
    PACOTES+="$NTSTPKG"
 	echo "## Adicionando pacotes para ambiente fora do trabalho"
 	echo "$NTSTPKG"
@@ -165,7 +169,8 @@ function usage() {
 
 # Variaveis #
 
-PACOTES='wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin ntpdate icedtea-web vlc pidgin gnome-subtitles gimp lifeograph audacity uld foremost libreoffice libreoffice-langpack-pt-BR meld VirtualBox'
+PACOTES='wget gparted rpm-build vim bind-utils iptraf make gcc git flash-plugin  pidgin gnome-subtitles gimp lifeograph audacity uld foremost libreoffice libreoffice-langpack-pt-BR meld VirtualBox flac lame vlc code'
+#vlc ntpdate icedtea-web 
 
 while [ "$1" != '' ]; do
    case $1 in
